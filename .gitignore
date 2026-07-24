@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+server/node_modules/
+
+# Playwright cache & screenshots
+server/screenshots/
+.cache/
+
+# Environment files
+.env
+.env.local
+server/.env
+
+# OS files
+.DS_Store
+Thumbs.db

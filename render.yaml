@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: huduma-smart-server
+    runtime: node
+    rootDir: server
+    buildCommand: npm install && npx playwright install chromium --with-deps
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DEBUG_VISIBLE
+        value: "false"
+      - key: PORT
+        generateValue: false
+        value: "3001"
+    plan: starter
