@@ -8,23 +8,32 @@
  *   npx playwright install chromium
  */
 
-const express  = require("express");
-const path     = require("path");
-const fs       = require("fs-extra");
+const express = require("express");
+const path = require("path");
+const fs = require("fs-extra");
 const { chromium } = require("playwright-extra");
-const stealth  = require("puppeteer-extra-plugin-stealth");
+const stealth = require("puppeteer-extra-plugin-stealth");
 
 // ── Apply stealth plugin ──────────────────────────────────────────────────────
 chromium.use(stealth());
 
-const app  = express();
+const app = express();
 const PORT = process.env.PORT || 3001;
+
+// ── CORS — allow the browser frontend to call this service directly ────────────
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
 
 app.use(express.json());
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const PORTAL_URL  = "https://portal.hef.co.ke/login";
+const PORTAL_URL = "https://portal.hef.co.ke/login";
 const SCREENSHOTS = path.join(__dirname, "screenshots");
 fs.ensureDirSync(SCREENSHOTS);
 
@@ -76,17 +85,17 @@ async function newStealthPage(browser) {
 
 // ── Snapshot helper ───────────────────────────────────────────────────────────
 async function captureError(page, label) {
-  const ts   = Date.now();
-  const png  = path.join(SCREENSHOTS, `${label}-${ts}.png`);
+  const ts = Date.now();
+  const png = path.join(SCREENSHOTS, `${label}-${ts}.png`);
   const html = path.join(SCREENSHOTS, `${label}-${ts}.html`);
-  await page.screenshot({ path: png, fullPage: true }).catch(() => {});
+  await page.screenshot({ path: png, fullPage: true }).catch(() => { });
   const content = await page.content().catch(() => "<could not capture>");
-  await fs.writeFile(html, content).catch(() => {});
+  await fs.writeFile(html, content).catch(() => { });
   return { png, html, timestamp: ts };
 }
 
 // ── Core login function ───────────────────────────────────────────────────────
-async function helbLogin(nationalId, password) {
+async function helbLogin(email, password) {
   const browser = await launchBrowser();
   const { page, ctx } = await newStealthPage(browser);
 
@@ -120,7 +129,7 @@ async function helbLogin(nationalId, password) {
         idField = el; break;
       }
     }
-    if (!idField) throw new Error("Could not find the National ID input field.");
+    if (!idField) throw new Error("Could not find the Email input field.");
 
     // 4. Locate Password field
     const pwSelectors = [
@@ -141,7 +150,7 @@ async function helbLogin(nationalId, password) {
     await idField.click();
     await idField.fill(""); // clear first
     await page.waitForTimeout(humanDelay());
-    await idField.pressSequentially(nationalId, { delay: humanDelay() });
+    await idField.pressSequentially(email, { delay: humanDelay() });
 
     await page.waitForTimeout(humanDelay() * 2);
 
@@ -172,7 +181,7 @@ async function helbLogin(nationalId, password) {
     // 7. Click and wait for navigation
     console.log("[helb-login] Submitting login form…");
     await Promise.all([
-      page.waitForNavigation({ waitUntil: "networkidle", timeout: 30000 }).catch(() => {}),
+      page.waitForNavigation({ waitUntil: "networkidle", timeout: 30000 }).catch(() => { }),
       submitBtn.click(),
     ]);
 
@@ -235,7 +244,7 @@ async function helbLogin(nationalId, password) {
 
     // 11. Scrape basic account info from dashboard
     const pageTitle = await page.title().catch(() => "");
-    const cookies   = await ctx.cookies();
+    const cookies = await ctx.cookies();
     const sessionCookie = cookies.find(c => c.name.toLowerCase().includes("session") || c.name.toLowerCase().includes("token"));
 
     console.log("[helb-login] ✅ Login successful.");
@@ -255,8 +264,8 @@ async function helbLogin(nationalId, password) {
       snapshot: snap,
     };
   } finally {
-    await ctx.close().catch(() => {});
-    await browser.close().catch(() => {});
+    await ctx.close().catch(() => { });
+    await browser.close().catch(() => { });
   }
 }
 

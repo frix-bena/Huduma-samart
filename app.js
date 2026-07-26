@@ -2,22 +2,28 @@
 let GEN = 0;
 const S = { auth: false, email: null, name: null, id: null, sessionToken: null };
 
-// ── n8n Webhook Config (Playwright Headless Automation) ──
+// ── Playwright Microservice Config ──
+// Set RENDER_URL to your deployed Render service URL.
+// Falls back to localhost:3001 for local development.
+const RENDER_URL = "https://huduma-smart-server.onrender.com"; // ← your Render URL
+const IS_LOCAL = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+const MICROSERVICE_URL = IS_LOCAL ? "http://localhost:3001" : RENDER_URL;
+
 const N8N = {
-  enabled: false, // flip to true when n8n is live
-  auth: "http://localhost:5678/webhook/helb-auth",
-  balance: "http://localhost:5678/webhook/helb-balance",
-  disb: "http://localhost:5678/webhook/helb-disb",
-  appStatus: "http://localhost:5678/webhook/helb-app-status",
-  repayment: "http://localhost:5678/webhook/helb-repayment",
-  statement: "http://localhost:5678/webhook/helb-statement",
-  apply: "http://localhost:5678/webhook/helb-apply",
-  clearance: "http://localhost:5678/webhook/helb-clearance",
-  appeal: "http://localhost:5678/webhook/helb-appeal",
-  updateInfo: "http://localhost:5678/webhook/helb-update-info",
-  saveCreds: "http://localhost:5678/webhook/helb-save-creds",
-  otp: "http://localhost:5678/webhook/helb-otp",
-  support: "http://localhost:5678/webhook/helb-support"
+  enabled: true,  // live — real emails go directly to the HELB portal
+  auth: `${MICROSERVICE_URL}/api/helb/login`,
+  otp: `${MICROSERVICE_URL}/api/helb/otp`,
+  balance: `${MICROSERVICE_URL}/api/helb/balance`,
+  disb: `${MICROSERVICE_URL}/api/helb/disb`,
+  appStatus: `${MICROSERVICE_URL}/api/helb/app-status`,
+  repayment: `${MICROSERVICE_URL}/api/helb/repayment`,
+  statement: `${MICROSERVICE_URL}/api/helb/statement`,
+  apply: `${MICROSERVICE_URL}/api/helb/apply`,
+  clearance: `${MICROSERVICE_URL}/api/helb/clearance`,
+  appeal: `${MICROSERVICE_URL}/api/helb/appeal`,
+  updateInfo: `${MICROSERVICE_URL}/api/helb/update-info`,
+  saveCreds: `${MICROSERVICE_URL}/api/helb/save-creds`,
+  support: `${MICROSERVICE_URL}/api/helb/support`
 };
 
 // ── Mock DB (fallback when n8n disabled) ──
@@ -36,24 +42,19 @@ async function n8nCall(url, payload) {
 }
 
 async function apiAuth(email, pw) {
-  if (N8N.enabled) {
-    try { return await n8nCall(N8N.auth, { email, password: pw, portal: "hef.co.ke" }); }
-    catch (e) { console.error("n8n auth failed", e); }
+  // Always call the live Playwright microservice — no mock fallback
+  try {
+    return await n8nCall(N8N.auth, { email, password: pw });
+  } catch (error) {
+    console.error("[apiAuth] Microservice call failed:", error);
+    throw error;
   }
-  await rawWait(1500);
-  const u = DB[email.toLowerCase()];
-  return u && u.pw === pw ? { ok: true, ...u } : { ok: false };
 }
 
 async function apiAction(url, payload) {
-  if (N8N.enabled) {
-    try { return await n8nCall(url, { ...payload, sessionToken: S.sessionToken }); }
-    catch (e) { return { error: e.message }; }
-  }
-  await rawWait(1200);
-  const u = DB[S.email?.toLowerCase()];
-  if (!u) return { error: "User not found" };
-  return { ok: true, ...u };
+  // Live: forward to n8n webhook with session token attached
+  try { return await n8nCall(url, { ...payload, sessionToken: S.sessionToken }); }
+  catch (e) { return { error: e.message }; }
 }
 
 // ── DOM Refs ──
@@ -147,22 +148,32 @@ function askAuth(g) {
       }
       errEl.textContent = "";
       const btn = document.getElementById("authBtn");
-      btn.textContent = "Logging in to portal…"; btn.disabled = true;
-      const res = await apiAuth(em, pw);
+      btn.textContent = "Logging in to HELB portal…"; btn.disabled = true;
+      let res;
+      try {
+        res = await apiAuth(em, pw);
+      } catch (err) {
+        btn.textContent = "Login to Portal"; btn.disabled = false;
+        errEl.textContent = "⚠️ Could not reach the automation service. Make sure the server is running on port 3001.";
+        return;
+      }
       if (GEN !== g) return resolve(false);
       if (res.ok) {
-        Object.assign(S, { auth: true, email: em, name: res.name, id: res.id, sessionToken: res.sessionToken || "mock-token" });
-        if (N8N.enabled) { try { await n8nCall(N8N.saveCreds, { email: em, password: pw }); } catch { } }
-        sessionBadge.innerHTML = `<svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M8 0a8 8 0 100 16A8 8 0 008 0zm3.5 6l-4.5 4.5L5 8.5 6 7.5l1 1 3.5-3.5 1 1z"/></svg> ${res.name}`;
-        topbarStatus.innerHTML = `<span class="status-pulse"></span> Authenticated — ${res.name}`;
-        document.getElementById("authCard").innerHTML = `<div class="rc ok"><div class="rc-lbl">✅ Portal Access Granted</div><div class="rc-sub">Credentials saved. Welcome back, <strong>${res.name}</strong>. You won't need to log in again this session.</div></div>`;
+        // Extract name from page title or fall back to email prefix
+        const displayName = res.name || res.pageTitle?.split(" ")[0] || em.split("@")[0];
+        Object.assign(S, { auth: true, email: em, name: displayName, id: res.id || null, sessionToken: res.sessionToken || null });
+        sessionBadge.innerHTML = `<svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M8 0a8 8 0 100 16A8 8 0 008 0zm3.5 6l-4.5 4.5L5 8.5 6 7.5l1 1 3.5-3.5 1 1z"/></svg> ${displayName}`;
+        topbarStatus.innerHTML = `<span class="status-pulse"></span> Authenticated — ${displayName}`;
+        document.getElementById("authCard").innerHTML = `<div class="rc ok"><div class="rc-lbl">✅ Portal Access Granted</div><div class="rc-sub">Logged in as <strong>${em}</strong>. Session is active for this conversation.</div></div>`;
         resolve(true);
       } else if (res.otp_required) {
-        document.getElementById("authCard").innerHTML = `<div class="rc warn"><div class="rc-lbl">OTP Required</div><div class="rc-sub">An OTP was sent to your registered phone. Please type it below.</div></div>`;
+        document.getElementById("authCard").innerHTML = `<div class="rc warn"><div class="rc-lbl">📱 OTP Required</div><div class="rc-sub">The portal sent a one-time code to your registered phone. Please type it below.</div></div>`;
         resolve("otp");
       } else {
-        btn.textContent = "Login"; btn.disabled = false;
-        document.getElementById("authErr").textContent = "Invalid credentials. Please check and try again.";
+        btn.textContent = "Login to Portal"; btn.disabled = false;
+        // Show the real portal error (wrong password, account locked, etc.)
+        const portalMsg = res.message || "Invalid credentials. Please check and try again.";
+        document.getElementById("authErr").textContent = `❌ ${portalMsg}`;
       }
     };
     window.cancelLogin = () => { GEN++; resolve(false); document.getElementById("authCard")?.remove(); };
@@ -179,7 +190,7 @@ function askAuth(g) {
           <div style="font-size:11px;color:var(--red);margin-bottom:10px;" id="authErr"></div>
           <div class="auth-row"><button type="button" class="auth-btn-cancel" onclick="cancelLogin()">Cancel</button><button type="submit" class="auth-btn" id="authBtn">Login to Portal</button></div>
         </form>
-        <div style="font-size:10px;color:var(--t3);margin-top:10px;">🔒 Credentials are passed directly to the n8n Playwright microservice and never stored in plain text.</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:10px;">🔒 Your credentials are sent directly to the Playwright microservice and are never stored in plain text.</div>
       </div>`;
     feed.appendChild(row); scroll();
   });
@@ -193,8 +204,7 @@ function askOTP(g) {
       if (!code) return;
       const btn = document.getElementById("otpBtn"); btn.textContent = "Verifying…"; btn.disabled = true;
       let res = { ok: false };
-      if (N8N.enabled) { try { res = await n8nCall(N8N.otp, { otp: code, sessionToken: S.sessionToken }); } catch { } }
-      else { await rawWait(1000); res = { ok: true }; }
+      try { res = await n8nCall(N8N.otp, { otp: code, sessionToken: S.sessionToken }); } catch { }
       if (GEN !== g) return resolve(false);
       if (res.ok) resolve(true); else { btn.textContent = "Verify"; btn.disabled = false; document.getElementById("otpErr").textContent = "Invalid OTP. Try again."; }
     };
