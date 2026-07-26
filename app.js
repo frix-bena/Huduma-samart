@@ -3,27 +3,30 @@ let GEN = 0;
 const S = { auth: false, email: null, name: null, id: null, sessionToken: null };
 
 // ── Playwright Microservice Config ──
-// Set RENDER_URL to your deployed Render service URL.
-// Falls back to localhost:3001 for local development.
-const RENDER_URL = "https://huduma-smart-server.onrender.com"; // ← your Render URL
-const IS_LOCAL = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-const MICROSERVICE_URL = IS_LOCAL ? "http://localhost:3001" : RENDER_URL;
+// On Vercel: API routes live on the same domain → use relative paths (empty prefix).
+// Locally: Express server runs on port 3001 → use full localhost URL.
+const IS_LOCAL = (
+  window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1" ||
+  window.location.protocol === "file:"
+);
+const MICROSERVICE_URL = IS_LOCAL ? "http://localhost:3001" : "";
 
 const N8N = {
-  enabled: true,  // live — real emails go directly to the HELB portal
-  auth: `${MICROSERVICE_URL}/api/helb/login`,
-  otp: `${MICROSERVICE_URL}/api/helb/otp`,
-  balance: `${MICROSERVICE_URL}/api/helb/balance`,
-  disb: `${MICROSERVICE_URL}/api/helb/disb`,
-  appStatus: `${MICROSERVICE_URL}/api/helb/app-status`,
-  repayment: `${MICROSERVICE_URL}/api/helb/repayment`,
-  statement: `${MICROSERVICE_URL}/api/helb/statement`,
-  apply: `${MICROSERVICE_URL}/api/helb/apply`,
-  clearance: `${MICROSERVICE_URL}/api/helb/clearance`,
-  appeal: `${MICROSERVICE_URL}/api/helb/appeal`,
+  enabled: true,  // live — real credentials go directly to the HELB portal
+  auth:       `${MICROSERVICE_URL}/api/helb/login`,
+  otp:        `${MICROSERVICE_URL}/api/helb/otp`,
+  balance:    `${MICROSERVICE_URL}/api/helb/balance`,
+  disb:       `${MICROSERVICE_URL}/api/helb/disb`,
+  appStatus:  `${MICROSERVICE_URL}/api/helb/app-status`,
+  repayment:  `${MICROSERVICE_URL}/api/helb/repayment`,
+  statement:  `${MICROSERVICE_URL}/api/helb/statement`,
+  apply:      `${MICROSERVICE_URL}/api/helb/apply`,
+  clearance:  `${MICROSERVICE_URL}/api/helb/clearance`,
+  appeal:     `${MICROSERVICE_URL}/api/helb/appeal`,
   updateInfo: `${MICROSERVICE_URL}/api/helb/update-info`,
-  saveCreds: `${MICROSERVICE_URL}/api/helb/save-creds`,
-  support: `${MICROSERVICE_URL}/api/helb/support`
+  saveCreds:  `${MICROSERVICE_URL}/api/helb/save-creds`,
+  support:    `${MICROSERVICE_URL}/api/helb/support`
 };
 
 // ── Mock DB (fallback when n8n disabled) ──

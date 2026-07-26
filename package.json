@@ -1,0 +1,9 @@
+{
+  "name": "huduma-smart",
+  "version": "1.0.0",
+  "description": "Huduma Smart — HELB AI Consultant with Playwright automation via Vercel serverless",
+  "dependencies": {
+    "@sparticuz/chromium": "^133.0.0",
+    "playwright-core": "^1.54.0"
+  }
+}
