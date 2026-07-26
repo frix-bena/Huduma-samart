@@ -2,31 +2,25 @@
 let GEN = 0;
 const S = { auth: false, email: null, name: null, id: null, sessionToken: null };
 
-// ── Playwright Microservice Config ──
-// On Vercel: API routes live on the same domain → use relative paths (empty prefix).
-// Locally: Express server runs on port 3001 → use full localhost URL.
-const IS_LOCAL = (
-  window.location.hostname === "localhost" ||
-  window.location.hostname === "127.0.0.1" ||
-  window.location.protocol === "file:"
-);
-const MICROSERVICE_URL = IS_LOCAL ? "http://localhost:3001" : "";
-
+// ── Backend Microservice Config ──
 const N8N = {
-  enabled: true,  // live — real credentials go directly to the HELB portal
-  auth:       `${MICROSERVICE_URL}/api/helb/login`,
-  otp:        `${MICROSERVICE_URL}/api/helb/otp`,
-  balance:    `${MICROSERVICE_URL}/api/helb/balance`,
-  disb:       `${MICROSERVICE_URL}/api/helb/disb`,
-  appStatus:  `${MICROSERVICE_URL}/api/helb/app-status`,
-  repayment:  `${MICROSERVICE_URL}/api/helb/repayment`,
-  statement:  `${MICROSERVICE_URL}/api/helb/statement`,
-  apply:      `${MICROSERVICE_URL}/api/helb/apply`,
-  clearance:  `${MICROSERVICE_URL}/api/helb/clearance`,
-  appeal:     `${MICROSERVICE_URL}/api/helb/appeal`,
-  updateInfo: `${MICROSERVICE_URL}/api/helb/update-info`,
-  saveCreds:  `${MICROSERVICE_URL}/api/helb/save-creds`,
-  support:    `${MICROSERVICE_URL}/api/helb/support`
+  enabled: true, // Make sure this is set to true to enable the backend
+  auth: "http://localhost:3001/api/helb/login", // Pointing to your Express server
+  otp: "http://localhost:3001/api/helb/otp",    // Pointing to your Express server
+
+  // The rest of these will need similar backend routes created later,
+  // but let's keep them as placeholders for now so the app doesn't break.
+  balance: "http://localhost:3001/api/helb/balance",
+  disb: "http://localhost:3001/api/helb/disb",
+  appStatus: "http://localhost:3001/api/helb/app-status",
+  repayment: "http://localhost:3001/api/helb/repayment",
+  statement: "http://localhost:3001/api/helb/statement",
+  apply: "http://localhost:3001/api/helb/apply",
+  clearance: "http://localhost:3001/api/helb/clearance",
+  appeal: "http://localhost:3001/api/helb/appeal",
+  updateInfo: "http://localhost:3001/api/helb/update-info",
+  saveCreds: "http://localhost:3001/api/helb/save-creds",
+  support: "http://localhost:3001/api/helb/support"
 };
 
 // ── Mock DB (fallback when n8n disabled) ──
@@ -45,13 +39,19 @@ async function n8nCall(url, payload) {
 }
 
 async function apiAuth(email, pw) {
-  // Always call the live Playwright microservice — no mock fallback
-  try {
-    return await n8nCall(N8N.auth, { email, password: pw });
-  } catch (error) {
-    console.error("[apiAuth] Microservice call failed:", error);
-    throw error;
+  if (N8N.enabled) {
+    try { 
+      // Send the email and password variables exactly as the backend expects them
+      return await n8nCall(N8N.auth, { email: email, password: pw }); 
+    } catch (error) { 
+      console.error("Backend auth failed:", error); 
+      throw error; 
+    }
   }
+  
+  await rawWait(1500);
+  const u = DB[email.toLowerCase()];
+  return u && u.pw === pw ? { ok: true, ...u } : { ok: false };
 }
 
 async function apiAction(url, payload) {
@@ -151,13 +151,14 @@ function askAuth(g) {
       }
       errEl.textContent = "";
       const btn = document.getElementById("authBtn");
-      btn.textContent = "Logging in to HELB portal…"; btn.disabled = true;
+      btn.textContent = "Logging in to portal…"; btn.disabled = true;
+      
       let res;
       try {
         res = await apiAuth(em, pw);
-      } catch (err) {
+      } catch (error) {
         btn.textContent = "Login to Portal"; btn.disabled = false;
-        errEl.textContent = "⚠️ Could not reach the automation service. Make sure the server is running on port 3001.";
+        errEl.innerHTML = `⚠️ Could not reach the automation service. Make sure the server is running on port 3001.`;
         return;
       }
       if (GEN !== g) return resolve(false);
