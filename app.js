@@ -3,25 +3,27 @@ let GEN = 0;
 const S = { auth: false, email: null, name: null, id: null, sessionToken: null };
 
 // ── Backend Microservice Config ──
-const N8N = {
-  enabled: true, // Make sure this is set to true to enable the backend
-  auth: "http://localhost:3001/api/helb/login", // Pointing to your Express server
-  otp: "http://localhost:3001/api/helb/otp",    // Pointing to your Express server
+// All API calls go to the Express server at http://localhost:3001
+// Change the port here if you run the server on a different port.
+const BACKEND = "http://localhost:3001";
 
-  // The rest of these will need similar backend routes created later,
-  // but let's keep them as placeholders for now so the app doesn't break.
-  balance: "http://localhost:3001/api/helb/balance",
-  disb: "http://localhost:3001/api/helb/disb",
-  appStatus: "http://localhost:3001/api/helb/app-status",
-  repayment: "http://localhost:3001/api/helb/repayment",
-  statement: "http://localhost:3001/api/helb/statement",
-  apply: "http://localhost:3001/api/helb/apply",
-  clearance: "http://localhost:3001/api/helb/clearance",
-  appeal: "http://localhost:3001/api/helb/appeal",
-  updateInfo: "http://localhost:3001/api/helb/update-info",
-  saveCreds: "http://localhost:3001/api/helb/save-creds",
-  support: "http://localhost:3001/api/helb/support"
+const N8N = {
+  enabled:    true,
+  auth:       `${BACKEND}/api/helb/login`,
+  otp:        `${BACKEND}/api/helb/otp`,
+  balance:    `${BACKEND}/api/helb/balance`,
+  disb:       `${BACKEND}/api/helb/disb`,
+  appStatus:  `${BACKEND}/api/helb/app-status`,
+  repayment:  `${BACKEND}/api/helb/repayment`,
+  statement:  `${BACKEND}/api/helb/statement`,
+  apply:      `${BACKEND}/api/helb/apply`,
+  clearance:  `${BACKEND}/api/helb/clearance`,
+  appeal:     `${BACKEND}/api/helb/appeal`,
+  updateInfo: `${BACKEND}/api/helb/update-info`,
+  saveCreds:  `${BACKEND}/api/helb/save-creds`,
+  support:    `${BACKEND}/api/helb/support`
 };
+
 
 // ── Mock DB (fallback when n8n disabled) ──
 const DB = {
@@ -32,33 +34,46 @@ const DB = {
 
 const rawWait = ms => new Promise(r => setTimeout(r, ms));
 
+/**
+ * n8nCall — POST to the backend and return the parsed JSON response.
+ *
+ * Response handling:
+ *  2xx / 4xx → return JSON body as-is  (e.g. { ok:false, message:"wrong password" })
+ *  5xx       → throw so the UI shows "service error"
+ *  Network   → throw so the UI shows "could not reach service"
+ */
 async function n8nCall(url, payload) {
-  const resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-  if (!resp.ok) throw new Error(`n8n error: ${resp.status}`);
-  return resp.json();
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  // Always try to parse JSON — backend sends structured errors on 4xx too
+  const data = await resp.json().catch(() => ({ ok: false, message: `HTTP ${resp.status}` }));
+
+  // Only throw for server-side failures (5xx) — 4xx are valid portal responses
+  if (resp.status >= 500) throw new Error(data.message || `Server error ${resp.status}`);
+
+  return data;
 }
 
 async function apiAuth(email, pw) {
   if (N8N.enabled) {
-    try { 
-      // Send the email and password variables exactly as the backend expects them
-      return await n8nCall(N8N.auth, { email: email, password: pw }); 
-    } catch (error) { 
-      console.error("Backend auth failed:", error); 
-      throw error; 
-    }
+    // Returns { ok, message, sessionToken? } or { ok:false, otp_required:true }
+    // Throws only on network error or 5xx — not on wrong password (401)
+    return await n8nCall(N8N.auth, { email: email, password: pw });
   }
-  
   await rawWait(1500);
   const u = DB[email.toLowerCase()];
   return u && u.pw === pw ? { ok: true, ...u } : { ok: false };
 }
 
 async function apiAction(url, payload) {
-  // Live: forward to n8n webhook with session token attached
   try { return await n8nCall(url, { ...payload, sessionToken: S.sessionToken }); }
   catch (e) { return { error: e.message }; }
 }
+
 
 // ── DOM Refs ──
 const feed = document.getElementById("feed");
@@ -158,7 +173,7 @@ function askAuth(g) {
         res = await apiAuth(em, pw);
       } catch (error) {
         btn.textContent = "Login to Portal"; btn.disabled = false;
-        errEl.innerHTML = `⚠️ Could not reach the automation service. Make sure the server is running on port 3001.`;
+        errEl.innerHTML = `⚠️ Could not reach the automation service. Make sure the server is running (check your terminal).`;
         return;
       }
       if (GEN !== g) return resolve(false);
