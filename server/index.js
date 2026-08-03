@@ -118,81 +118,19 @@ async function helbLogin(email, password) {
       await page.waitForTimeout(500);
     }
 
-    // 3. PRIMARY WAIT — block until ANY recognisable email input is in the DOM.
-    //    This is the main fix: we wait up to 10 s for the form to appear before
-    //    touching anything, so we never fail just because the page hadn't rendered yet.
-    const PRIMARY_EMAIL_SELECTORS = [
-      "input[type='email']",
-      "input[name='email']",
-      "input[id*='email' i]",
-      "input[placeholder*='email' i]",
-      "input[autocomplete='email']",
-      "input[autocomplete='username']",
-    ];
-    console.log("[helb-login] Waiting for email input to appear in DOM…");
-    await page
-      .waitForSelector(PRIMARY_EMAIL_SELECTORS.join(", "), { state: "visible", timeout: 10000 })
-      .catch(() => console.warn("[helb-login] Primary waitForSelector timed out — trying fallback loop"));
+    // 3. Wait for the login form to be ready using the exact live portal placeholder text.
+    //    getByPlaceholder() matches what a human sees — immune to CSS class/ID changes.
+    console.log("[helb-login] Waiting for login form to appear…");
+    const idField = page.getByPlaceholder("Enter your email or ID number");
+    await idField.waitFor({ state: "visible", timeout: 15000 });
+    console.log("[helb-login] ✅ Email/ID field found.");
 
-    // 4. FALLBACK LOOP — try every known selector with a 10 s budget each.
-    //    Covers non-standard or changed portal markup.
-    const idSelectors = [
-      "input[type='email']",                    // ← most specific; HEF portal email field
-      "input[name='email']",
-      "input[id*='email' i]",
-      "input[placeholder*='email' i]",
-      "input[autocomplete='email']",            // modern autocomplete hint
-      "input[autocomplete='username']",
-      "input[aria-label*='email' i]",           // aria-labelled field
-      "input[aria-label*='user' i]",
-      "input[name='username']",
-      "input[placeholder*='user' i]",
-      "input[placeholder*='login' i]",
-      "form input[type='text']:first-of-type",  // first text input inside a form
-      "input[type='text']:first-of-type",       // broadest fallback
-    ];
+    // 4. Locate the password field by its placeholder.
+    const pwField = page.getByPlaceholder("Password");
+    await pwField.waitFor({ state: "visible", timeout: 10000 });
+    console.log("[helb-login] ✅ Password field found.");
 
-    let idField = null;
-    for (const sel of idSelectors) {
-      const el = page.locator(sel).first();
-      if (await el.isVisible({ timeout: 10000 }).catch(() => false)) {
-        idField = el;
-        console.log(`[helb-login] Email field found via selector: ${sel}`);
-        break;
-      }
-    }
-    if (!idField) {
-      await captureError(page, "no-email-field");
-      throw new Error(
-        "Could not find the Email input field. The portal may have changed its layout — check the snapshot."
-      );
-    }
-
-    // 5. Locate Password field (10 s per selector)
-    const pwSelectors = [
-      "input[type='password']",
-      "input[name='password']",
-      "input[id*='pass' i]",
-      "input[autocomplete='current-password']",
-      "input[placeholder*='password' i]",
-      "input[placeholder*='pass' i]",
-      "input[aria-label*='password' i]",
-    ];
-    let pwField = null;
-    for (const sel of pwSelectors) {
-      const el = page.locator(sel).first();
-      if (await el.isVisible({ timeout: 10000 }).catch(() => false)) {
-        pwField = el;
-        console.log(`[helb-login] Password field found via selector: ${sel}`);
-        break;
-      }
-    }
-    if (!pwField) {
-      await captureError(page, "no-password-field");
-      throw new Error("Could not find the Password input field.");
-    }
-
-    // 6. Human-like typing
+    // 5. Human-like typing into email/ID field.
     await idField.click();
     await idField.fill("");
     await page.waitForTimeout(humanDelay());
@@ -200,6 +138,7 @@ async function helbLogin(email, password) {
 
     await page.waitForTimeout(humanDelay() * 2);
 
+    // 6. Human-like typing into password field.
     await pwField.click();
     await pwField.fill("");
     await page.waitForTimeout(humanDelay());
@@ -207,29 +146,13 @@ async function helbLogin(email, password) {
 
     await page.waitForTimeout(humanDelay() * 2);
 
-    // 7. Find and click the submit button (10 s per selector)
-    const submitSelectors = [
-      "button[type='submit']",
-      "input[type='submit']",
-      "button:has-text('Login')",
-      "button:has-text('Log In')",
-      "button:has-text('Sign In')",
-      "button:has-text('Continue')",
-      "[role='button']:has-text('Login')",
-    ];
-    let submitBtn = null;
-    for (const sel of submitSelectors) {
-      const el = page.locator(sel).first();
-      if (await el.isVisible({ timeout: 10000 }).catch(() => false)) {
-        submitBtn = el;
-        console.log(`[helb-login] Submit button found via selector: ${sel}`);
-        break;
-      }
-    }
-    if (!submitBtn) throw new Error("Could not find the login submit button.");
+    // 7. Click the Login button by its visible label.
+    //    getByRole('button') with exact name is the most reliable way to find submit buttons.
+    const submitBtn = page.getByRole("button", { name: "Login", exact: true });
+    await submitBtn.waitFor({ state: "visible", timeout: 10000 });
+    console.log("[helb-login] ✅ Login button found. Submitting…");
 
-    // 8. Submit and wait for navigation
-    console.log("[helb-login] Submitting login form…");
+    // 8. Submit and wait for navigation.
     await Promise.all([
       page.waitForNavigation({ waitUntil: "networkidle", timeout: 30000 }).catch(() => {}),
       submitBtn.click(),
@@ -385,7 +308,7 @@ app.get("/api/health", (_, res) =>
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`\n🚀 Huduma Smart — HELB AI Consultant`);
+  console.log(`\n🚀 Huduma Smart — HELB AI Consultant (Playwright Microservice)`);
   console.log(`   App (frontend + API): http://localhost:${PORT}`);
   console.log(`   API health check:     http://localhost:${PORT}/api/health`);
   console.log(`   Debug mode: ${process.env.DEBUG_VISIBLE === "true" ? "VISIBLE BROWSER" : "headless"}`);
