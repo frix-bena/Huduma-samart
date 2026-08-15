@@ -52,40 +52,40 @@
         <span>✦</span> New Conversation
       </button>
 
-      <div class="sidebar-section-label">Quick Actions</div>
+      <div class="sidebar-section-label">HEF Portal Services</div>
       <nav class="sidebar-nav">
-        <button class="nav-btn" onclick="quickAction('check my loan balance')">
-          <span class="nav-icon">💰</span> Loan Balance
+        <button class="nav-btn" onclick="openProfileModal()">
+          <span class="nav-icon">👤</span> My Student Profile
         </button>
-        <button class="nav-btn" onclick="quickAction('check my application status')">
-          <span class="nav-icon">📄</span> Application Status
+        <button class="nav-btn" onclick="quickAction('check my loan balance')">
+          <span class="nav-icon">💰</span> Loan Overview &amp; Dues
+        </button>
+        <button class="nav-btn" onclick="quickAction('show my hef band breakdown')">
+          <span class="nav-icon">📊</span> HEF Band Breakdown
         </button>
         <button class="nav-btn" onclick="quickAction('show my disbursement schedule')">
           <span class="nav-icon">📅</span> Disbursement Schedule
         </button>
-        <button class="nav-btn" onclick="quickAction('show my repayment history')">
-          <span class="nav-icon">🔄</span> Repayment History
+        <button class="nav-btn" onclick="quickAction('check my application status')">
+          <span class="nav-icon">📄</span> Application &amp; MTI Status
         </button>
         <button class="nav-btn" onclick="quickAction('download my loan statement')">
-          <span class="nav-icon">📑</span> Loan Statement
+          <span class="nav-icon">📑</span> Official Loan Statement
         </button>
-        <button class="nav-btn" onclick="quickAction('apply for a HELB loan')">
-          <span class="nav-icon">📚</span> Apply for Loan
+        <button class="nav-btn" onclick="quickAction('how to repay loan via mpesa')">
+          <span class="nav-icon">💳</span> Repayment (Paybill 200800)
         </button>
-        <button class="nav-btn" onclick="quickAction('apply for clearance certificate')">
+        <button class="nav-btn" onclick="quickAction('how do i appeal my band')">
+          <span class="nav-icon">📝</span> Band Appeal Guidance
+        </button>
+        <button class="nav-btn" onclick="quickAction('check clearance certificate')">
           <span class="nav-icon">🔍</span> Clearance Certificate
         </button>
-        <button class="nav-btn" onclick="quickAction('update my personal information')">
-          <span class="nav-icon">👤</span> Update Account
+        <button class="nav-btn" onclick="quickAction('how do i apply for first time helb')">
+          <span class="nav-icon">📚</span> First Time Application
         </button>
-        <button class="nav-btn" onclick="quickAction('submit an appeal')">
-          <span class="nav-icon">📝</span> Submit Appeal
-        </button>
-        <button class="nav-btn" onclick="quickAction('employer verification and remittance')">
-          <span class="nav-icon">🏦</span> Employer Services
-        </button>
-        <button class="nav-btn" onclick="quickAction('show HELB announcements and deadlines')">
-          <span class="nav-icon">🔔</span> Announcements
+        <button class="nav-btn" onclick="quickAction('helb customer care contacts')">
+          <span class="nav-icon">📞</span> Huduma Desks &amp; Support
         </button>
       </nav>
 
@@ -115,7 +115,13 @@
           </div>
         </div>
         <div class="topbar-right">
-          <div class="session-badge" id="sessionBadge">
+          <button class="profile-toggle-btn" id="profileBtn" onclick="openProfileModal()" title="View & Edit Student Details">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+            </svg>
+            <span>Profile Details</span>
+          </button>
+          <div class="session-badge" id="sessionBadge" onclick="openProfileModal()" style="cursor:pointer;" title="Click to view details">
             <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><circle cx="8" cy="5" r="3"/><path d="M2 13c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg>
             Guest
           </div>
@@ -140,22 +146,27 @@
             </div>
           </div>
           <h1 class="hero-title">Huduma Smart</h1>
-          <p class="hero-subtitle">Your official HELB AI consultant. Powered by direct Playwright portal automation.</p>
+          <p class="hero-subtitle">Your dedicated HELB &amp; HEF AI Chatbot. Get realistic portal values, band calculations, disbursement schedules &amp; statements instantly.</p>
           <div class="hero-cards">
             <div class="hero-card" onclick="quickAction('check my loan balance')">
               <div class="hc-icon">💰</div>
-              <div class="hc-label">Check Balance</div>
-              <div class="hc-desc">Outstanding loan &amp; interest</div>
+              <div class="hc-label">Loan Overview</div>
+              <div class="hc-desc">Outstanding balance &amp; interest</div>
             </div>
-            <div class="hero-card" onclick="quickAction('check my application status')">
-              <div class="hc-icon">📄</div>
-              <div class="hc-label">Track Application</div>
-              <div class="hc-desc">Status, docs &amp; approval</div>
+            <div class="hero-card" onclick="quickAction('show my hef band breakdown')">
+              <div class="hc-icon">📊</div>
+              <div class="hc-label">Band Breakdown</div>
+              <div class="hc-desc">Scholarship vs Loan vs Upkeep</div>
             </div>
             <div class="hero-card" onclick="quickAction('show my disbursement schedule')">
               <div class="hc-icon">📅</div>
               <div class="hc-label">Disbursements</div>
-              <div class="hc-desc">Schedule &amp; amounts</div>
+              <div class="hc-desc">Tuition &amp; upkeep release dates</div>
+            </div>
+            <div class="hero-card" onclick="quickAction('download my loan statement')">
+              <div class="hc-icon">📑</div>
+              <div class="hc-label">Loan Statement</div>
+              <div class="hc-desc">Full official ledger history</div>
             </div>
           </div>
         </div>
@@ -163,12 +174,15 @@
 
       <!-- Quick chips -->
       <div class="chips-bar" id="chipsBar">
-        <button class="chip" onclick="quickAction('check my loan balance')">💰 Loan Balance</button>
-        <button class="chip" onclick="quickAction('show my disbursement schedule')">📅 Disbursement</button>
+        <button class="chip" onclick="quickAction('check my loan balance')">💰 Balance</button>
+        <button class="chip" onclick="quickAction('show my hef band breakdown')">📊 Band Breakdown</button>
+        <button class="chip" onclick="quickAction('show my disbursement schedule')">📅 Disbursements</button>
         <button class="chip" onclick="quickAction('check my application status')">📄 App Status</button>
         <button class="chip" onclick="quickAction('download my loan statement')">📑 Statement</button>
-        <button class="chip" onclick="quickAction('make a repayment')">💳 Repayment</button>
-        <button class="chip" onclick="quickAction('apply for a new HELB loan')">📚 Apply</button>
+        <button class="chip" onclick="quickAction('how to repay loan via mpesa')">💳 Paybill 200800</button>
+        <button class="chip" onclick="quickAction('how do i appeal my band')">📝 Appeal Band</button>
+        <button class="chip" onclick="quickAction('check clearance certificate')">🔍 Clearance</button>
+        <button class="chip" onclick="quickAction('helb customer care contacts')">📞 Support</button>
       </div>
 
       <!-- Input bar -->
@@ -176,7 +190,7 @@
         <div class="input-box">
           <textarea
             id="userInput"
-            placeholder="Ask about your HELB account…"
+            placeholder="Ask anything about HELB, HEF bands, disbursements, statements, or your details…"
             rows="1"
             onkeydown="handleKey(event)"
             oninput="autoResize(this); updateSendBtn()"
@@ -195,10 +209,105 @@
           </button>
         </div>
         <div class="input-footer">
-          Huduma Smart may make mistakes. Always verify critical financial details on the <a href="https://portal.hef.co.ke" target="_blank" rel="noopener">official HEF portal</a>.
+          Huduma Smart is specialized solely in HELB &amp; HEF student financing. Verify critical official records at <a href="https://portal.hef.co.ke" target="_blank" rel="noopener">portal.hef.co.ke</a>.
         </div>
       </div>
     </main>
+  </div>
+
+  <!-- ── Student Profile Details Modal ── -->
+  <div class="modal-backdrop" id="profileModal" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div class="modal-title">👤 Student HEF Profile Details</div>
+        <button class="icon-btn" onclick="closeProfileModal()" title="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">
+          Enter your details as registered on <strong>portal.hef.co.ke</strong> to compute exact realistic loan balances, band allocations, scholarships, and disbursement schedules.
+        </p>
+        <form id="profileForm" onsubmit="saveProfileDetails(event)">
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="profId">National ID / Alien ID</label>
+              <input type="text" id="profId" placeholder="e.g. 38492018" required pattern="\d{5,10}">
+            </div>
+            <div class="form-group">
+              <label for="profName">Student Full Name</label>
+              <input type="text" id="profName" placeholder="e.g. Brian Kiprop Cheruiyot" required>
+            </div>
+            <div class="form-group">
+              <label for="profInst">Institution (University / College)</label>
+              <select id="profInst">
+                <option value="University of Nairobi (UoN)">University of Nairobi (UoN)</option>
+                <option value="Kenyatta University (KU)">Kenyatta University (KU)</option>
+                <option value="Jomo Kenyatta University of Agriculture and Technology (JKUAT)">JKUAT</option>
+                <option value="Moi University">Moi University</option>
+                <option value="Egerton University">Egerton University</option>
+                <option value="Technical University of Kenya (TUK)">TUK</option>
+                <option value="Maseno University">Maseno University</option>
+                <option value="Dedan Kimathi University of Technology (DeKUT)">DeKUT</option>
+                <option value="Machakos University">Machakos University</option>
+                <option value="Multimedia University of Kenya (MMU)">Multimedia University (MMU)</option>
+                <option value="Strathmore University">Strathmore University</option>
+                <option value="Mount Kenya University (MKU)">Mount Kenya University (MKU)</option>
+                <option value="Kabarak University">Kabarak University</option>
+                <option value="The Kenya Coast National Polytechnic">Kenya Coast National Polytechnic (TVET)</option>
+                <option value="Rift Valley Technical Training Institute (RVTTI)">RVTTI (TVET)</option>
+                <option value="Nairobi Technical Training Institute (NTTI)">NTTI (TVET)</option>
+                <option value="Kabete National Polytechnic">Kabete National Polytechnic (TVET)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="profProg">Degree / Diploma Programme</label>
+              <input type="text" id="profProg" placeholder="e.g. Bachelor of Science in Computer Science" required>
+            </div>
+            <div class="form-group">
+              <label for="profBand">Assigned HEF Funding Band</label>
+              <select id="profBand">
+                <option value="1">Band 1 — Vulnerable (70% Schol, 25% Loan, KES 60k Upkeep)</option>
+                <option value="2" selected>Band 2 — Extremely Needy (60% Schol, 30% Loan, KES 55k Upkeep)</option>
+                <option value="3">Band 3 — Needy (50% Schol, 30% Loan, KES 50k Upkeep)</option>
+                <option value="4">Band 4 — Less Needy (40% Schol, 30% Loan, KES 45k Upkeep)</option>
+                <option value="5">Band 5 — Least Needy (30% Schol, 30% Loan, KES 40k Upkeep)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="profYear">Year of Study</label>
+              <select id="profYear">
+                <option value="1">Year 1 (First Year)</option>
+                <option value="2" selected>Year 2 (Second Year)</option>
+                <option value="3">Year 3 (Third Year)</option>
+                <option value="4">Year 4 (Fourth Year)</option>
+                <option value="5">Year 5 (Fifth Year)</option>
+                <option value="6">Year 6 (Medical)</option>
+              </select>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button type="button" class="auth-btn-cancel" onclick="closeProfileModal()">Cancel</button>
+            <button type="submit" class="auth-btn">Apply &amp; Recalculate Portal Data</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Official Statement Viewer Modal ── -->
+  <div class="modal-backdrop" id="statementModal" style="display:none;">
+    <div class="modal-card modal-lg">
+      <div class="modal-head">
+        <div class="modal-title">📑 Official HELB Statement of Account</div>
+        <button class="icon-btn" onclick="closeStatementModal()" title="Close">✕</button>
+      </div>
+      <div class="modal-body" id="statementContent">
+        <!-- Rendered statement -->
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="auth-btn-cancel" onclick="closeStatementModal()">Close</button>
+        <button type="button" class="auth-btn" onclick="printStatement()">🖨️ Print / Save PDF</button>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

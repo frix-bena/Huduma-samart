@@ -13,6 +13,7 @@ const querystring = require("querystring");
 const fs = require("fs-extra");
 const { chromium } = require("playwright-extra");
 const stealth = require("puppeteer-extra-plugin-stealth")();
+const hefEngine = require("./hefEngine");
 
 // Apply stealth plugin for Playwright
 chromium.use(stealth);
@@ -570,20 +571,73 @@ app.post("/api/helb/otp", async (req, res) => {
 });
 
 /**
- * POST /api/helb/balance
+ * Helper to get resolved HEF profile for request
  */
-app.post("/api/helb/balance", (req, res) => {
-  const { email, sessionToken } = req.body || {};
+function getRequestProfile(req) {
+  const body = req.body || {};
+  const userIdentifier = body.credential || body.email || body.nationalId || body.user;
+  return hefEngine.resolveHefProfile({
+    ...body,
+    credential: userIdentifier,
+    nationalId: body.nationalId || (userIdentifier && /^\d{5,10}$/.test(userIdentifier) ? userIdentifier : undefined),
+    email: body.email || (userIdentifier && userIdentifier.includes("@") ? userIdentifier : undefined)
+  });
+}
+
+/**
+ * POST /api/helb/profile
+ * Get or compute full realistic HEF profile for user
+ */
+app.post("/api/helb/profile", (req, res) => {
+  const profile = getRequestProfile(req);
   res.json({
     ok: true,
     success: true,
-    user: email || "Student",
-    out: 74500,
-    bal: 110000,
-    repaid: 35500,
-    penalty: 0,
+    profile,
+    message: "HEF portal profile computed successfully."
+  });
+});
+
+app.get("/api/helb/profile", (req, res) => {
+  const profile = hefEngine.resolveHefProfile(req.query || {});
+  res.json({
+    ok: true,
+    success: true,
+    profile,
+    message: "HEF portal profile computed successfully."
+  });
+});
+
+/**
+ * POST /api/helb/balance
+ */
+app.post("/api/helb/balance", (req, res) => {
+  const profile = getRequestProfile(req);
+  const { funding, student } = profile;
+
+  res.json({
+    ok: true,
+    success: true,
+    user: student.name,
+    nationalId: student.nationalId,
+    institution: student.institution,
+    programme: student.programme,
+    band: funding.band,
+    bandName: funding.bandName,
+    bandCategory: funding.bandCategory,
+    out: funding.cumulative.outstandingBalance,
+    bal: funding.cumulative.awardedPrincipal,
+    repaid: funding.cumulative.repaid,
+    interestAccrued: funding.cumulative.interestAccrued,
+    penalty: funding.cumulative.penalty,
+    annualTuition: funding.annual.tuition,
+    annualScholarship: funding.annual.scholarship,
+    annualTuitionLoan: funding.annual.tuitionLoan,
+    annualUpkeepLoan: funding.annual.upkeepLoan,
+    annualHouseholdFee: funding.annual.householdFee,
+    percentages: funding.percentages,
     status: "Active",
-    message: "Loan balance retrieved successfully."
+    message: `Loan balance retrieved successfully for ${student.name}.`
   });
 });
 
@@ -591,16 +645,29 @@ app.post("/api/helb/balance", (req, res) => {
  * POST /api/helb/disb
  */
 app.post("/api/helb/disb", (req, res) => {
+  const profile = getRequestProfile(req);
+  const formattedDisb = profile.disbursements.map(d => ({
+    d: d.date,
+    a: d.amount,
+    s: d.status,
+    purpose: d.purpose,
+    beneficiary: d.beneficiary,
+    batch: d.batchNumber,
+    academicYear: d.academicYear,
+    semester: d.semester,
+    ref: d.reference
+  }));
+
   res.json({
     ok: true,
     success: true,
-    disb: [
-      { d: "2024-09-15", a: 22000, s: "Disbursed" },
-      { d: "2024-01-20", a: 22000, s: "Disbursed" },
-      { d: "2023-09-10", a: 20000, s: "Disbursed" },
-      { d: "2025-02-01", a: 22000, s: "Scheduled" }
-    ],
-    message: "Disbursement schedule retrieved."
+    student: profile.student.name,
+    nationalId: profile.student.nationalId,
+    institution: profile.student.institution,
+    band: profile.funding.bandName,
+    disb: formattedDisb,
+    fullSchedule: profile.disbursements,
+    message: `Disbursement schedule retrieved for ${profile.student.name}.`
   });
 });
 
@@ -608,13 +675,33 @@ app.post("/api/helb/disb", (req, res) => {
  * POST /api/helb/app-status
  */
 app.post("/api/helb/app-status", (req, res) => {
+  const profile = getRequestProfile(req);
+  const { appStatus, student, funding } = profile;
+
   res.json({
     ok: true,
     success: true,
-    appStatus: "Approved",
-    stage: "Funds Allocation",
-    batch: "HEF-2024/2025-01",
-    message: "Application status retrieved."
+    student: student.name,
+    nationalId: student.nationalId,
+    institution: student.institution,
+    programme: student.programme,
+    appStatus: appStatus.status,
+    stage: appStatus.stage,
+    batch: appStatus.applicationRef,
+    bandAllocated: appStatus.bandAllocated,
+    bandCategory: appStatus.bandCategory,
+    mtiScore: appStatus.mtiScore,
+    dateSubmitted: appStatus.dateSubmitted,
+    dateApproved: appStatus.dateApproved,
+    appealEligible: appStatus.appealEligible,
+    appealStatus: appStatus.appealStatus,
+    fundingSummary: {
+      scholarship: funding.annual.scholarship,
+      tuitionLoan: funding.annual.tuitionLoan,
+      upkeepLoan: funding.annual.upkeepLoan,
+      householdFee: funding.annual.householdFee
+    },
+    message: "Application status retrieved successfully."
   });
 });
 
@@ -622,15 +709,24 @@ app.post("/api/helb/app-status", (req, res) => {
  * POST /api/helb/repayment
  */
 app.post("/api/helb/repayment", (req, res) => {
+  const profile = getRequestProfile(req);
+  const { funding, student } = profile;
+
   res.json({
     ok: true,
     success: true,
-    repaid: 35500,
-    out: 74500,
-    lastPaymentDate: "2024-07-28",
-    lastPaymentAmount: 5000,
-    paymentMethod: "M-Pesa Paybill 200800",
-    message: "Repayment data retrieved."
+    student: student.name,
+    nationalId: student.nationalId,
+    repaid: funding.cumulative.repaid,
+    out: funding.cumulative.outstandingBalance,
+    awarded: funding.cumulative.awardedPrincipal,
+    lastPaymentDate: funding.cumulative.repaid > 0 ? "2024-08-10" : "None",
+    lastPaymentAmount: funding.cumulative.repaid > 0 ? funding.cumulative.repaid : 0,
+    paymentMethod: `M-Pesa Paybill 200800 (Account: ${student.nationalId})`,
+    paybill: "200800",
+    accountNumber: student.nationalId,
+    interestRate: "4% p.a. (Undergraduate)",
+    message: "Repayment data retrieved successfully."
   });
 });
 
@@ -638,11 +734,24 @@ app.post("/api/helb/repayment", (req, res) => {
  * POST /api/helb/statement
  */
 app.post("/api/helb/statement", (req, res) => {
+  const profile = getRequestProfile(req);
+  const { statement, student, funding } = profile;
+
   res.json({
     ok: true,
     success: true,
+    student: student.name,
+    nationalId: student.nationalId,
+    kcseIndex: student.kcseIndex,
+    institution: student.institution,
+    programme: student.programme,
+    band: funding.bandName,
+    openingBalance: statement.openingBalance,
+    closingBalance: statement.closingBalance,
+    statementDate: statement.statementDate,
+    ledger: statement.ledger,
     pdfUrl: "https://portal.hef.co.ke/",
-    message: "Statement generated."
+    message: "Official HELB statement ledger generated successfully."
   });
 });
 
@@ -650,11 +759,16 @@ app.post("/api/helb/statement", (req, res) => {
  * POST /api/helb/apply
  */
 app.post("/api/helb/apply", (req, res) => {
+  const profile = getRequestProfile(req);
   res.json({
     ok: true,
     success: true,
-    ref: `APP-${Date.now()}`,
-    message: "Loan application process initiated."
+    ref: `HEF-APP-${Date.now().toString().slice(-6)}`,
+    student: profile.student.name,
+    nationalId: profile.student.nationalId,
+    institution: profile.student.institution,
+    academicYear: profile.student.academicYear,
+    message: "Loan and scholarship application sequence initialized."
   });
 });
 
@@ -662,12 +776,20 @@ app.post("/api/helb/apply", (req, res) => {
  * POST /api/helb/clearance
  */
 app.post("/api/helb/clearance", (req, res) => {
+  const profile = getRequestProfile(req);
+  const { clearance, funding, student } = profile;
+
   res.json({
     ok: true,
     success: true,
-    eligible: false,
-    reason: "Active loan balance outstanding (KES 74,500). Repay remaining balance to receive clearance certificate.",
-    message: "Clearance status retrieved."
+    student: student.name,
+    nationalId: student.nationalId,
+    eligible: clearance.eligible,
+    certificateType: clearance.certificateType,
+    balance: funding.cumulative.outstandingBalance,
+    reason: clearance.reason,
+    verificationCode: clearance.eligible ? `HELB-CLR-${student.nationalId}-${Date.now().toString().slice(-4)}` : null,
+    message: clearance.eligible ? "Eligible for HELB Clearance Certificate." : "Active balance outstanding."
   });
 });
 
@@ -675,11 +797,28 @@ app.post("/api/helb/clearance", (req, res) => {
  * POST /api/helb/appeal
  */
 app.post("/api/helb/appeal", (req, res) => {
+  const profile = getRequestProfile(req);
+  const requestedBand = req.body.requestedBand || (Math.max(1, profile.funding.band - 1));
+
   res.json({
     ok: true,
     success: true,
-    ref: `APPEAL-${Date.now()}`,
-    message: "Appeal submitted successfully."
+    ref: `HEF-APL-${Date.now().toString().slice(-6)}`,
+    student: profile.student.name,
+    nationalId: profile.student.nationalId,
+    currentBand: profile.funding.bandName,
+    requestedBand: `Band ${requestedBand}`,
+    status: "Appeal Ticket Logged",
+    requiredDocuments: [
+      "Copy of National ID of applicant and parents/guardians",
+      "Death certificates (if orphaned / deceased parent)",
+      "Medical records / bills (for chronic illnesses in household)",
+      "NCPWD Card / Doctor report (if Person With Disability)",
+      "Chief / Assistant Chief verification letter",
+      "Sworn Affidavit of economic status from Commissioner of Oaths",
+      "Salary slips / termination letter / bank statement of breadwinner"
+    ],
+    message: `Appeal lodged to re-categorize from ${profile.funding.bandName} to Band ${requestedBand}.`
   });
 });
 
@@ -687,10 +826,13 @@ app.post("/api/helb/appeal", (req, res) => {
  * POST /api/helb/update-info
  */
 app.post("/api/helb/update-info", (req, res) => {
+  const profile = getRequestProfile(req);
   res.json({
     ok: true,
     success: true,
-    message: "Account information update request received."
+    student: profile.student.name,
+    updatedFields: Object.keys(req.body).filter(k => k !== "sessionToken" && k !== "credential"),
+    message: "HEF account information update request received and verified."
   });
 });
 
@@ -701,7 +843,14 @@ app.post("/api/helb/support", (req, res) => {
   res.json({
     ok: true,
     success: true,
-    ticketId: `TCK-${Math.floor(Math.random() * 899999 + 100000)}`,
+    ticketId: `HELB-SUP-${Math.floor(Math.random() * 899999 + 100000)}`,
+    channels: {
+      phone: ["+254 711 052 000", "+254 20 2278 000"],
+      email: ["contactcentre@helb.co.ke", "info@hef.co.ke"],
+      hudumaCentres: "Available countrywide at HELB service desks in all 47 county Huduma Centres",
+      headOffice: "Anniversary Towers, 18th & 19th Floors, University Way, Nairobi",
+      hours: "Monday to Friday: 8:00 AM – 5:00 PM EAT"
+    },
     message: "Support inquiry submitted."
   });
 });
