@@ -1,0 +1,23 @@
+{
+  "name": "huduma-smart-playwright-server",
+  "version": "1.0.0",
+  "description": "Huduma Smart — HELB Playwright headless browser microservice",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "debug": "DEBUG_VISIBLE=true node index.js",
+    "install-browsers": "npx playwright install chromium"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^4.19.2",
+    "fs-extra": "^11.2.0",
+    "playwright": "^1.54.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
+  "overrides": {
+    "side-channel": "1.0.6"
+  }
+}
