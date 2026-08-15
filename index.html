@@ -52,11 +52,15 @@
         <span>✦</span> New Conversation
       </button>
 
-      <div class="sidebar-section-label">HEF Portal Services</div>
+      <div class="sidebar-section-label">HEF Portal Account</div>
       <nav class="sidebar-nav">
-        <button class="nav-btn" onclick="openProfileModal()">
+        <button class="nav-btn nav-btn-primary" id="sidebarLoginBtn" onclick="openLoginModal()">
+          <span class="nav-icon">🔑</span> Log In to HEF Portal
+        </button>
+        <button class="nav-btn" id="sidebarProfileBtn" onclick="openProfileModal()" style="display:none;">
           <span class="nav-icon">👤</span> My Student Profile
         </button>
+        <div class="sidebar-section-label" style="padding-left:4px;margin-top:8px;">Portal Services</div>
         <button class="nav-btn" onclick="quickAction('check my loan balance')">
           <span class="nav-icon">💰</span> Loan Overview &amp; Dues
         </button>
@@ -87,6 +91,9 @@
         <button class="nav-btn" onclick="quickAction('helb customer care contacts')">
           <span class="nav-icon">📞</span> Huduma Desks &amp; Support
         </button>
+        <button class="nav-btn nav-btn-danger" id="sidebarLogoutBtn" onclick="logout()" style="display:none;margin-top:12px;">
+          <span class="nav-icon">🚪</span> Log Out / Switch Account
+        </button>
       </nav>
 
       <div class="sidebar-footer">
@@ -110,20 +117,26 @@
           <div>
             <div class="topbar-name">Huduma Smart</div>
             <div class="topbar-status" id="topbarStatus">
-              <span class="status-pulse"></span> Online — Ready to assist
+              <span class="status-pulse"></span> HEF Portal Gateway
             </div>
           </div>
         </div>
         <div class="topbar-right">
-          <button class="profile-toggle-btn" id="profileBtn" onclick="openProfileModal()" title="View & Edit Student Details">
+          <button class="login-nav-btn" id="topbarLoginBtn" onclick="openLoginModal()" title="Log In with your National ID / Email & Password">
+            <span>🔑</span> Log In to Portal
+          </button>
+          <button class="profile-toggle-btn" id="profileBtn" onclick="openProfileModal()" style="display:none;" title="View & Edit Student Details">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
             </svg>
             <span>Profile Details</span>
           </button>
-          <div class="session-badge" id="sessionBadge" onclick="openProfileModal()" style="cursor:pointer;" title="Click to view details">
-            <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><circle cx="8" cy="5" r="3"/><path d="M2 13c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg>
-            Guest
+          <button class="logout-nav-btn" id="logoutBtn" onclick="logout()" style="display:none;" title="Log Out / Switch Account">
+            <span>🚪</span>
+          </button>
+          <div class="session-badge unauth" id="sessionBadge" onclick="handleBadgeClick()" style="cursor:pointer;" title="Click to log in or view account">
+            <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M8 1a3.5 3.5 0 0 0-3.5 3.5V6H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-.5V4.5A3.5 3.5 0 0 0 8 1zm2 5H6V4.5a2 2 0 1 1 4 0V6z"/></svg>
+            <span>Not Logged In</span>
           </div>
         </div>
       </header>
@@ -213,6 +226,56 @@
         </div>
       </div>
     </main>
+  </div>
+
+  <!-- ── HEF Portal Login Modal ── -->
+  <div class="modal-backdrop" id="loginModal" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div class="modal-title">🔐 Sign In to HEF Portal (portal.hef.co.ke)</div>
+        <button class="icon-btn" onclick="closeLoginModal()" title="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">
+          For the agent to retrieve and interact with your HELB loan balances, band breakdowns, upkeep disbursements, and statements, please sign in using your credentials as registered on <strong>portal.hef.co.ke</strong>.
+        </p>
+        <form id="loginForm" onsubmit="handleLoginSubmit(event)">
+          <div class="form-group" style="margin-bottom:12px;">
+            <label for="loginCredential">Kenyan National ID or Registered Email</label>
+            <input type="text" id="loginCredential" placeholder="e.g. 38492018 or student@university.ac.ke" required autocomplete="username">
+          </div>
+          <div class="form-group" style="margin-bottom:14px;">
+            <label for="loginPassword">HEF Portal Password</label>
+            <div class="password-input-wrap">
+              <input type="password" id="loginPassword" placeholder="Enter your portal password" required autocomplete="current-password">
+              <button type="button" class="pwd-toggle-btn" onclick="togglePasswordVisibility('loginPassword', this)" title="Show/Hide Password">👁️</button>
+            </div>
+          </div>
+
+          <div class="preset-section">
+            <div class="preset-label">⚡ Quick Test Presets (One-Click):</div>
+            <div class="preset-chips">
+              <button type="button" class="preset-chip" onclick="fillLogin('38492018', 'Student@2024')">
+                <strong>Brian Kiprop</strong> (ID: 38492018 · Band 2)
+              </button>
+              <button type="button" class="preset-chip" onclick="fillLogin('39102948', 'Student@2024')">
+                <strong>Faith Wanjiku</strong> (ID: 39102948 · Band 1 - Vulnerable)
+              </button>
+              <button type="button" class="preset-chip" onclick="fillLogin('36829104', 'Student@2024')">
+                <strong>Kevin Otieno</strong> (ID: 36829104 · Band 3 - Needy)
+              </button>
+            </div>
+          </div>
+
+          <div class="modal-foot" style="margin-top:16px;padding:0;border:none;">
+            <button type="button" class="auth-btn-cancel" onclick="closeLoginModal()">Cancel</button>
+            <button type="submit" class="auth-btn" id="loginSubmitBtn">
+              <span>🔑</span> Connect &amp; Retrieve Records
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 
   <!-- ── Student Profile Details Modal ── -->

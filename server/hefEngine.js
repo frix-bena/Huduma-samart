@@ -128,10 +128,72 @@ function hashString(str) {
   return Math.abs(hash);
 }
 
+const PRESETS = {
+  "38492018": {
+    name: "Brian Kiprop Cheruiyot",
+    nationalId: "38492018",
+    email: "brian.cheruiyot@students.ku.ac.ke",
+    phone: "+254 712 345 678",
+    kcseIndex: "12345678001/2022",
+    institution: "Kenyatta University (KU)",
+    programme: "Bachelor of Science in Computer Science",
+    level: "Undergraduate",
+    yearOfStudy: 2,
+    currentSemester: 1,
+    band: 2,
+    academicYear: "2024/2025",
+    bankName: "Equity Bank Kenya",
+    accountNumber: "0112938472901",
+    repaid: 0,
+    penalty: 0
+  },
+  "39102948": {
+    name: "Faith Wanjiku Mwangi",
+    nationalId: "39102948",
+    email: "faith.wanjiku@students.uonbi.ac.ke",
+    phone: "+254 722 987 654",
+    kcseIndex: "11200001004/2021",
+    institution: "University of Nairobi (UoN)",
+    programme: "Bachelor of Medicine and Bachelor of Surgery (MBChB)",
+    level: "Undergraduate",
+    yearOfStudy: 3,
+    currentSemester: 1,
+    band: 1,
+    academicYear: "2024/2025",
+    bankName: "KCB Bank Kenya",
+    accountNumber: "1289401928",
+    repaid: 0,
+    penalty: 0
+  },
+  "36829104": {
+    name: "Kevin Otieno Omondi",
+    nationalId: "36829104",
+    email: "kevin.otieno@students.jkuat.ac.ke",
+    phone: "+254 733 456 789",
+    kcseIndex: "20400002019/2020",
+    institution: "Jomo Kenyatta University of Agriculture and Technology (JKUAT)",
+    programme: "Bachelor of Science in Electrical & Electronic Engineering",
+    level: "Undergraduate",
+    yearOfStudy: 4,
+    currentSemester: 1,
+    band: 3,
+    academicYear: "2024/2025",
+    bankName: "Co-operative Bank of Kenya",
+    accountNumber: "01192847192",
+    repaid: 15000,
+    penalty: 0
+  }
+};
+
 /**
  * Find or generate realistic user details based on inputs
  */
 function resolveHefProfile(input = {}) {
+  const cleanId = (input.nationalId || input.credential || input.email || "").trim();
+  if (PRESETS[cleanId]) {
+    input = { ...PRESETS[cleanId], ...input };
+  }
+
   const seed = hashString(input.nationalId || input.email || input.credential || input.name || "38492018");
   
   // Resolve Band (default: 2 or user provided)
