@@ -1,7 +1,12 @@
 {
   "name": "huduma-smart",
   "version": "1.0.0",
-  "description": "Huduma Smart — HELB AI Consultant with Playwright automation via Vercel serverless",
+  "description": "Huduma Smart — HELB AI Consultant with Playwright automation via Vercel serverless and Express microservice",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "server": "cd server && npm start"
+  },
   "dependencies": {
     "@sparticuz/chromium": "^133.0.0",
     "playwright-core": "^1.54.0"
