@@ -83,6 +83,31 @@ async function newStealthPage(browser) {
   return { page, ctx };
 }
 
+/**
+ * Helper to identify network-level errors (e.g. ERR_ADDRESS_UNREACHABLE, ERR_CONNECTION_REFUSED, DNS failures)
+ */
+function isNetworkError(err) {
+  if (!err) return false;
+  const msg = (err.message || err.toString() || "").toLowerCase();
+  return (
+    msg.includes("err_address_unreachable") ||
+    msg.includes("err_connection_refused") ||
+    msg.includes("err_name_not_resolved") ||
+    msg.includes("err_internet_disconnected") ||
+    msg.includes("err_connection_timed_out") ||
+    msg.includes("err_connection_reset") ||
+    msg.includes("err_connection_closed") ||
+    msg.includes("err_timed_out") ||
+    msg.includes("err_network_changed") ||
+    msg.includes("err_ssl_protocol_error") ||
+    msg.includes("enotfound") ||
+    msg.includes("econnrefused") ||
+    msg.includes("ehostunreach") ||
+    msg.includes("etimedout") ||
+    msg.includes("net::")
+  );
+}
+
 // ── Snapshot helper ───────────────────────────────────────────────────────────
 async function captureError(page, label) {
   const ts   = Date.now();
@@ -100,9 +125,46 @@ async function helbLogin(email, password) {
   const { page, ctx } = await newStealthPage(browser);
 
   try {
-    // 1. Navigate to portal
-    console.log(`[helb-login] Navigating to ${PORTAL_URL}`);
-    await page.goto(PORTAL_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+    // 1. Navigate to portal with retry logic and graceful network error handling
+    const MAX_NAV_ATTEMPTS = 2;
+    let navSuccess = false;
+    let lastNavError = null;
+
+    for (let attempt = 1; attempt <= MAX_NAV_ATTEMPTS; attempt++) {
+      try {
+        console.log(`[helb-login] Navigating to ${PORTAL_URL} (attempt ${attempt}/${MAX_NAV_ATTEMPTS})…`);
+        await page.goto(PORTAL_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+        navSuccess = true;
+        console.log("[helb-login] ✅ Navigation successful.");
+        break;
+      } catch (navErr) {
+        lastNavError = navErr;
+        console.warn(`[helb-login] ⚠️ Navigation attempt ${attempt} failed: ${navErr.message}`);
+
+        // If it failed and we have retries left, wait 3 to 5 seconds before trying one more time
+        if (attempt < MAX_NAV_ATTEMPTS) {
+          const waitMs = 4000;
+          console.log(`[helb-login] Waiting ${waitMs / 1000}s before retrying navigation…`);
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+        }
+      }
+    }
+
+    if (!navSuccess) {
+      console.error(`[helb-login] ❌ Failed to navigate to ${PORTAL_URL} after ${MAX_NAV_ATTEMPTS} attempts:`, lastNavError?.message);
+
+      const isNet = isNetworkError(lastNavError);
+      const userMessage = isNet
+        ? "The HELB/HEF portal is currently offline or unreachable. Please try again later."
+        : `Could not load the HELB portal: ${lastNavError?.message || "Navigation failed"}`;
+
+      return {
+        ok: false,
+        success: false,
+        network_error: isNet,
+        message: userMessage,
+      };
+    }
 
     // Wait for the network to settle — use catch so a slow portal doesn't abort early
     await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {
@@ -118,39 +180,67 @@ async function helbLogin(email, password) {
       await page.waitForTimeout(500);
     }
 
-    // 3. Wait for the login form to be ready using the exact live portal placeholder text.
-    //    getByPlaceholder() matches what a human sees — immune to CSS class/ID changes.
+    // 3. Wait for the login form with resilient selectors and increased timeout
     console.log("[helb-login] Waiting for login form to appear…");
-    const idField = page.getByPlaceholder("Enter your email or ID number");
-    await idField.waitFor({ state: "visible", timeout: 15000 });
-    console.log("[helb-login] ✅ Email/ID field found.");
+    const usernameLocator = page
+      .locator('input[name="email"], input[type="email"], input[name="username"], input[placeholder*="Email" i], input[placeholder*="ID" i], input[id*="email" i], input[id*="user" i]')
+      .first();
 
-    // 4. Locate the password field by its placeholder.
-    const pwField = page.getByPlaceholder("Password");
-    await pwField.waitFor({ state: "visible", timeout: 10000 });
-    console.log("[helb-login] ✅ Password field found.");
+    try {
+      await usernameLocator.waitFor({ state: "visible", timeout: 60000 });
+      console.log("[helb-login] ✅ Email/ID field found.");
+    } catch (locErr) {
+      console.error("[helb-login] ❌ Timeout waiting for email/ID field:", locErr.message);
+      await page.screenshot({ path: "debug-login-timeout.png", fullPage: true }).catch(() => {});
+      await captureError(page, "debug-login-timeout");
+      throw new Error(`Login form timeout: Email/ID field not visible within 60s. Screenshot saved to debug-login-timeout.png. Error: ${locErr.message}`);
+    }
+
+    // 4. Locate the password field with resilient locator
+    const pwLocator = page
+      .locator('input[type="password"], input[name="password"], input[id*="pass" i], input[placeholder*="Password" i], input[placeholder*="Pass" i]')
+      .first();
+
+    try {
+      await pwLocator.waitFor({ state: "visible", timeout: 30000 });
+      console.log("[helb-login] ✅ Password field found.");
+    } catch (locErr) {
+      console.error("[helb-login] ❌ Timeout waiting for password field:", locErr.message);
+      await page.screenshot({ path: "debug-login-timeout.png", fullPage: true }).catch(() => {});
+      await captureError(page, "debug-password-timeout");
+      throw new Error(`Login form timeout: Password field not visible within 30s. Screenshot saved to debug-login-timeout.png. Error: ${locErr.message}`);
+    }
 
     // 5. Human-like typing into email/ID field.
-    await idField.click();
-    await idField.fill("");
+    await usernameLocator.click();
+    await usernameLocator.fill("");
     await page.waitForTimeout(humanDelay());
-    await idField.pressSequentially(email, { delay: humanDelay() });
+    await usernameLocator.pressSequentially(email, { delay: humanDelay() });
 
     await page.waitForTimeout(humanDelay() * 2);
 
     // 6. Human-like typing into password field.
-    await pwField.click();
-    await pwField.fill("");
+    await pwLocator.click();
+    await pwLocator.fill("");
     await page.waitForTimeout(humanDelay());
-    await pwField.pressSequentially(password, { delay: humanDelay() });
+    await pwLocator.pressSequentially(password, { delay: humanDelay() });
 
     await page.waitForTimeout(humanDelay() * 2);
 
-    // 7. Click the Login button by its visible label.
-    //    getByRole('button') with exact name is the most reliable way to find submit buttons.
-    const submitBtn = page.getByRole("button", { name: "Login", exact: true });
-    await submitBtn.waitFor({ state: "visible", timeout: 10000 });
-    console.log("[helb-login] ✅ Login button found. Submitting…");
+    // 7. Click the Login button with resilient locator
+    const submitBtn = page
+      .locator('button[type="submit"], input[type="submit"], button:has-text("Login"), button:has-text("Sign In"), button:has-text("Log In"), button:has-text("Submit")')
+      .first();
+
+    try {
+      await submitBtn.waitFor({ state: "visible", timeout: 30000 });
+      console.log("[helb-login] ✅ Login button found. Submitting…");
+    } catch (locErr) {
+      console.error("[helb-login] ❌ Timeout waiting for submit button:", locErr.message);
+      await page.screenshot({ path: "debug-login-timeout.png", fullPage: true }).catch(() => {});
+      await captureError(page, "debug-submit-timeout");
+      throw new Error(`Login form timeout: Login submit button not visible within 30s. Screenshot saved to debug-login-timeout.png. Error: ${locErr.message}`);
+    }
 
     // 8. Submit and wait for navigation.
     await Promise.all([
@@ -171,7 +261,7 @@ async function helbLogin(email, password) {
       if (await page.locator(sel).isVisible({ timeout: 3000 }).catch(() => false)) {
         console.log("[helb-login] OTP screen detected.");
         const snap = await captureError(page, "otp-required");
-        return { ok: false, otp_required: true, message: "OTP verification required.", snapshot: snap };
+        return { ok: false, success: false, otp_required: true, message: "OTP verification required.", snapshot: snap };
       }
     }
 
@@ -185,7 +275,7 @@ async function helbLogin(email, password) {
       if (await el.isVisible({ timeout: 3000 }).catch(() => false)) {
         const errText = await el.textContent().catch(() => "Unknown error");
         const snap    = await captureError(page, "login-failed");
-        return { ok: false, message: errText.trim(), snapshot: snap };
+        return { ok: false, success: false, message: errText.trim(), snapshot: snap };
       }
     }
 
@@ -205,6 +295,7 @@ async function helbLogin(email, password) {
       const snap = await captureError(page, "unknown-state");
       return {
         ok: false,
+        success: false,
         message:
           "Login submitted but the HELB dashboard was not detected. " +
           "Your credentials may be wrong, or the portal may be down. Check the snapshot.",
@@ -222,6 +313,7 @@ async function helbLogin(email, password) {
     console.log("[helb-login] ✅ Login successful.");
     return {
       ok: true,
+      success: true,
       message: "Login successful.",
       sessionToken: sessionCookie?.value || null,
       pageTitle,
@@ -229,8 +321,21 @@ async function helbLogin(email, password) {
 
   } catch (err) {
     console.error("[helb-login] ❌ Error:", err.message);
+    await page.screenshot({ path: "debug-login-timeout.png", fullPage: true }).catch(() => {});
     const snap = await captureError(page, "exception").catch(() => ({}));
-    return { ok: false, message: err.message, snapshot: snap };
+
+    const isNet = isNetworkError(err);
+    const message = isNet
+      ? "The HELB/HEF portal is currently offline or unreachable. Please try again later."
+      : err.message;
+
+    return {
+      ok: false,
+      success: false,
+      network_error: isNet,
+      message,
+      snapshot: snap,
+    };
   } finally {
     await ctx.close().catch(() => {});
     await browser.close().catch(() => {});
@@ -243,6 +348,7 @@ async function helbSubmitOTP(sessionToken, otpCode) {
   // For now, this is a placeholder that can be wired to a persistent session store.
   return {
     ok: false,
+    success: false,
     message:
       "OTP session resumption not yet implemented. " +
       "Store browser state between requests using context.storageState().",
@@ -256,7 +362,7 @@ async function helbSubmitOTP(sessionToken, otpCode) {
 /**
  * POST /api/helb/login
  * Body: { email: string, password: string }
- * Returns: { ok, message, sessionToken? } | { ok:false, otp_required, snapshot }
+ * Returns: { ok, success, message, sessionToken? } | { ok:false, success:false, otp_required, snapshot }
  */
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -265,13 +371,14 @@ app.post("/api/helb/login", async (req, res) => {
   const credential = email || nationalId;
 
   if (!credential || !password) {
-    return res.status(400).json({ ok: false, message: "An email address and password are required." });
+    return res.status(400).json({ ok: false, success: false, message: "An email address and password are required." });
   }
 
   // Fail-fast — HEF portal only accepts email addresses
   if (!EMAIL_REGEX.test(credential)) {
     return res.status(400).json({
       ok: false,
+      success: false,
       message: "The HEF portal requires a valid email address for login. National IDs are not accepted here.",
       hint:    "Please use the email address registered on portal.hef.co.ke",
     });
@@ -282,7 +389,11 @@ app.post("/api/helb/login", async (req, res) => {
     const status = result.ok ? 200 : result.otp_required ? 202 : 401;
     return res.status(status).json(result);
   } catch (err) {
-    return res.status(500).json({ ok: false, message: "Internal server error.", error: err.message });
+    const isNet = isNetworkError(err);
+    const message = isNet
+      ? "The HELB/HEF portal is currently offline or unreachable. Please try again later."
+      : "Internal server error.";
+    return res.status(500).json({ ok: false, success: false, message, error: err.message });
   }
 });
 
