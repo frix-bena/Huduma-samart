@@ -241,27 +241,31 @@
         </p>
         <form id="loginForm" onsubmit="handleLoginSubmit(event)">
           <div class="form-group" style="margin-bottom:12px;">
+            <label for="loginFullName">Student Full Name (As in HEF Portal)</label>
+            <input type="text" id="loginFullName" placeholder="e.g. Felix Korir Kipkemboi" autocomplete="name" oninput="handleFullNameChange(this.value)">
+          </div>
+          <div class="form-group" style="margin-bottom:12px;">
             <label for="loginCredential">Kenyan National ID or Registered Email</label>
-            <input type="text" id="loginCredential" placeholder="e.g. 38492018 or student@university.ac.ke" required autocomplete="username">
+            <input type="text" id="loginCredential" placeholder="e.g. 38492018 or student@university.ac.ke" required autocomplete="username" oninput="handleCredentialChange(this.value)">
           </div>
           <div class="form-group" style="margin-bottom:14px;">
             <label for="loginPassword">HEF Portal Password</label>
             <div class="password-input-wrap">
-              <input type="password" id="loginPassword" placeholder="Enter your portal password" required autocomplete="current-password">
+              <input type="password" id="loginPassword" placeholder="Enter your portal password" required autocomplete="current-password" oninput="handlePasswordChange(this.value)">
               <button type="button" class="pwd-toggle-btn" onclick="togglePasswordVisibility('loginPassword', this)" title="Show/Hide Password">👁️</button>
             </div>
           </div>
 
           <div class="preset-section">
-            <div class="preset-label">⚡ Quick Test Presets (One-Click):</div>
+            <div class="preset-label">⚡ Demo Accounts (Click to Test):</div>
             <div class="preset-chips">
-              <button type="button" class="preset-chip" onclick="fillLogin('38492018', 'Student@2024')">
+              <button type="button" class="preset-chip" onclick="fillLogin('38492018', 'Student@2024', 'Brian Kiprop Cheruiyot')">
                 <strong>Brian Kiprop</strong> (ID: 38492018 · Band 2)
               </button>
-              <button type="button" class="preset-chip" onclick="fillLogin('39102948', 'Student@2024')">
+              <button type="button" class="preset-chip" onclick="fillLogin('39102948', 'Student@2024', 'Faith Wanjiku Mwangi')">
                 <strong>Faith Wanjiku</strong> (ID: 39102948 · Band 1 - Vulnerable)
               </button>
-              <button type="button" class="preset-chip" onclick="fillLogin('36829104', 'Student@2024')">
+              <button type="button" class="preset-chip" onclick="fillLogin('36829104', 'Student@2024', 'Kevin Otieno Omondi')">
                 <strong>Kevin Otieno</strong> (ID: 36829104 · Band 3 - Needy)
               </button>
             </div>
@@ -287,17 +291,21 @@
       </div>
       <div class="modal-body">
         <p class="modal-desc">
-          Enter your details as registered on <strong>portal.hef.co.ke</strong> to compute exact realistic loan balances, band allocations, scholarships, and disbursement schedules.
+          Verify and update your authentic details as registered on <strong>portal.hef.co.ke</strong>. All calculations, statements, and disbursements will automatically synchronize.
         </p>
         <form id="profileForm" onsubmit="saveProfileDetails(event)">
           <div class="form-grid">
+            <div class="form-group">
+              <label for="profName">Student Full Name</label>
+              <input type="text" id="profName" placeholder="e.g. Felix Korir" required>
+            </div>
             <div class="form-group">
               <label for="profId">National ID / Alien ID</label>
               <input type="text" id="profId" placeholder="e.g. 38492018" required pattern="\d{5,10}">
             </div>
             <div class="form-group">
-              <label for="profName">Student Full Name</label>
-              <input type="text" id="profName" placeholder="e.g. Brian Kiprop Cheruiyot" required>
+              <label for="profKcse">KCSE Index Number</label>
+              <input type="text" id="profKcse" placeholder="e.g. 12345678001/2022">
             </div>
             <div class="form-group">
               <label for="profInst">Institution (University / College)</label>
@@ -345,6 +353,14 @@
                 <option value="5">Year 5 (Fifth Year)</option>
                 <option value="6">Year 6 (Medical)</option>
               </select>
+            </div>
+            <div class="form-group">
+              <label for="profBank">Upkeep Bank / Channel</label>
+              <input type="text" id="profBank" placeholder="e.g. Equity Bank Kenya">
+            </div>
+            <div class="form-group">
+              <label for="profAccount">Bank Account / Phone Number</label>
+              <input type="text" id="profAccount" placeholder="e.g. 0112938472901">
             </div>
           </div>
           <div class="modal-foot">

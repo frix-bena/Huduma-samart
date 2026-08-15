@@ -153,8 +153,11 @@ module.exports = async (req, res) => {
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") return res.status(405).json({ ok: false, success: false, message: "Method not allowed." });
 
-  const { credential, email, nationalId, password } = req.body || {};
-  const userIdentifier = credential || email || nationalId;
+  const { email, password } = req.body || {};
+  const userIdentifier = (email || req.body?.credential || req.body?.nationalId || "").trim();
+
+  // Audit log dynamic data arrival
+  console.log("Attempting login for dynamic user:", email || userIdentifier);
 
   if (!userIdentifier || !password) {
     return res.status(400).json({ ok: false, success: false, message: "Email / ID number and password are required." });
@@ -177,14 +180,21 @@ module.exports = async (req, res) => {
     // Generate profile using engine if available
     let profile = null;
     if (hefEngine && hefEngine.resolveHefProfile) {
-      profile = hefEngine.resolveHefProfile({ credential: userIdentifier, ...req.body });
+      profile = hefEngine.resolveHefProfile({
+        ...req.body,
+        credential: userIdentifier,
+        email: userIdentifier,
+        name: req.body?.name || req.body?.fullName || req.body?.studentName
+      });
     }
+
+    const defaultStudentName = (req.body?.name || req.body?.fullName || req.body?.studentName || (userIdentifier && /^\d{5,10}$/.test(userIdentifier) ? `HEF Loanee (${userIdentifier})` : "Authenticated Student")).trim();
 
     if (result.ok) {
       return res.status(200).json({
         ...result,
         profile: profile || {
-          student: { nationalId: userIdentifier, name: "Authenticated Student" },
+          student: { nationalId: userIdentifier, name: defaultStudentName },
           funding: { band: 2, bandName: "Band 2" }
         }
       });
@@ -202,7 +212,7 @@ module.exports = async (req, res) => {
       sessionToken: `hef-sess-${Date.now().toString(36)}`,
       message: "Login successful (HEF Portal Session Established).",
       profile: profile || {
-        student: { nationalId: userIdentifier, name: "Authenticated Student" },
+        student: { nationalId: userIdentifier, name: defaultStudentName },
         funding: { band: 2, bandName: "Band 2" }
       }
     });

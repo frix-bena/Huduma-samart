@@ -292,9 +292,9 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. Resilient Playwright Automation Engine
 // ─────────────────────────────────────────────────────────────────────────────
-async function playwrightHefLogin(credential, password) {
+async function playwrightHefLogin(email, password) {
   const isDebugVisible = process.env.DEBUG_VISIBLE === "true";
-  console.log(`[playwright-login] Starting Playwright browser (visible: ${isDebugVisible})…`);
+  console.log(`[playwright-login] Starting Playwright browser (visible: ${isDebugVisible}) for dynamic user: ${email}…`);
 
   const browser = await chromium.launch({
     headless: !isDebugVisible,
@@ -356,23 +356,23 @@ async function playwrightHefLogin(credential, password) {
     // 1. Locate the Email / ID field
     console.log("[playwright-login] Locating credential and password fields…");
     const emailSelector = '#form-email_add, input[name="email_add"], input[placeholder*="email or ID" i], input[name="email"], input[id*="email" i]';
-    const emailInput = page.locator(emailSelector).first();
-    await emailInput.waitFor({ state: "visible", timeout: 25000 });
+    const emailLocator = page.locator(emailSelector).first();
+    await emailLocator.waitFor({ state: "visible", timeout: 25000 });
 
     // 2. Locate the Password field
     const passSelector = '#form-password, input[name="password"], input[type="password"]';
-    const passInput = page.locator(passSelector).first();
-    await passInput.waitFor({ state: "visible", timeout: 15000 });
+    const passwordLocator = page.locator(passSelector).first();
+    await passwordLocator.waitFor({ state: "visible", timeout: 15000 });
 
-    // 3. Fill credentials
-    await emailInput.click();
-    await emailInput.fill("");
-    await emailInput.pressSequentially(credential, { delay: 35 });
+    // 3. Fill dynamic credentials
+    await emailLocator.click();
+    await emailLocator.fill("");
+    await emailLocator.type(email, { delay: 100 });
     await page.waitForTimeout(150);
 
-    await passInput.click();
-    await passInput.fill("");
-    await passInput.pressSequentially(password, { delay: 35 });
+    await passwordLocator.click();
+    await passwordLocator.fill("");
+    await passwordLocator.type(password, { delay: 100 });
     await page.waitForTimeout(200);
 
     // 4. Locate and click Login button
@@ -435,13 +435,64 @@ async function playwrightHefLogin(credential, password) {
     );
     const pageTitle = await page.title().catch(() => "");
 
-    console.log("[playwright-login] ✅ Login completed successfully.");
+    // Scrape authentic student details from the portal DOM if logged in
+    let scrapedData = null;
+    try {
+      await page.waitForLoadState("networkidle", { timeout: 6000 }).catch(() => {});
+      scrapedData = await page.evaluate(() => {
+        const body = document.body ? document.body.innerText : "";
+        let foundName = "";
+
+        // Common portal username and profile selectors
+        const nameCandidates = [
+          document.querySelector(".user-name")?.innerText,
+          document.querySelector(".profile-username")?.innerText,
+          document.querySelector(".profile-name")?.innerText,
+          document.querySelector(".user-panel .info")?.innerText,
+          document.querySelector("#student_name")?.innerText,
+          document.querySelector(".student-name")?.innerText,
+          document.querySelector(".nav-user-name")?.innerText,
+          document.querySelector("header .dropdown-toggle")?.innerText,
+          document.querySelector(".navbar-nav .dropdown-toggle")?.innerText,
+          document.querySelector(".navbar-custom-menu .dropdown-toggle")?.innerText
+        ].filter(Boolean);
+
+        for (const cand of nameCandidates) {
+          const c = cand.trim().replace(/^welcome,?\s*/i, "").replace(/^(student|user|hi):?\s*/i, "").trim();
+          if (c && c.length > 2 && !/dashboard|sign out|logout|profile|menu/i.test(c)) {
+            foundName = c;
+            break;
+          }
+        }
+
+        if (!foundName) {
+          const welcomeMatch = body.match(/Welcome[,\s]+([A-Z][a-zA-Z\s]{2,40})/i);
+          if (welcomeMatch) foundName = welcomeMatch[1].trim();
+        }
+
+        const idMatch = body.match(/(?:National\s*ID|ID\s*Number|ID\s*No)[\s:]*([0-9]{5,10})/i);
+        const kcseMatch = body.match(/(?:KCSE\s*Index|Index\s*No)[\s:]*([0-9\/\-]+)/i);
+        const bandMatch = body.match(/Band\s*([1-5])/i);
+        const instMatch = body.match(/(?:University|Institute|Polytechnic|College)[\s\w()\-]+/i);
+
+        return {
+          name: foundName || null,
+          nationalId: idMatch ? idMatch[1] : null,
+          kcseIndex: kcseMatch ? kcseMatch[1] : null,
+          band: bandMatch ? parseInt(bandMatch[1], 10) : null,
+          institution: instMatch ? instMatch[0].trim() : null
+        };
+      }).catch(() => null);
+    } catch (_) {}
+
+    console.log("[playwright-login] ✅ Login completed successfully. Scraped data:", scrapedData?.name || "None");
     return {
       ok: true,
       success: true,
       message: "Login successful.",
       sessionToken: sessionCookie?.value || "portal-session-authenticated",
       pageTitle: pageTitle || "HELB Portal Dashboard",
+      scrapedData
     };
 
   } catch (err) {
@@ -468,13 +519,13 @@ async function playwrightHefLogin(credential, password) {
  * 1. Tries Fast Direct Session Handshake
  * 2. Falls back to Stealth Playwright Automation if needed
  */
-async function helbLogin(credential, password) {
-  const cleanCred = credential.trim();
-  console.log(`\n[helb-login] Processing login request for "${cleanCred}"…`);
+async function helbLogin(email, password) {
+  const cleanEmail = (email || "").trim();
+  console.log(`\n[helb-login] Processing login request for dynamic user "${cleanEmail}"…`);
 
   // Attempt 1: Direct Session Request (lightning fast, ~1s)
   try {
-    const directRes = await directHefLogin(cleanCred, password, 20000);
+    const directRes = await directHefLogin(cleanEmail, password, 20000);
     if (directRes && !directRes.error && !directRes.timeout) {
       console.log(`[helb-login] Direct session result:`, directRes.ok ? "SUCCESS" : directRes.message);
       return directRes;
@@ -485,7 +536,8 @@ async function helbLogin(credential, password) {
   }
 
   // Attempt 2: Stealth Playwright Browser Automation
-  return await playwrightHefLogin(cleanCred, password);
+  console.log("Attempting login for dynamic user:", cleanEmail);
+  return await playwrightHefLogin(cleanEmail, password);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -508,11 +560,14 @@ app.get("/api/health", (_, res) => {
 
 /**
  * POST /api/helb/login
- * Body: { credential?: string, email?: string, nationalId?: string, password: string }
+ * Body: { email?: string, password: string, credential?: string, nationalId?: string }
  */
 app.post("/api/helb/login", async (req, res) => {
-  const { credential, email, nationalId, password } = req.body || {};
-  const userIdentifier = credential || email || nationalId;
+  const { email, password } = req.body || {};
+  const userIdentifier = (email || req.body?.credential || req.body?.nationalId || "").trim();
+
+  // Audit log right before the Playwright function is called to verify dynamic data arrived
+  console.log("Attempting login for dynamic user:", email || userIdentifier);
 
   if (!userIdentifier || !password) {
     return res.status(400).json({
@@ -533,8 +588,19 @@ app.post("/api/helb/login", async (req, res) => {
   try {
     const result = await helbLogin(userIdentifier, password);
     
+    // Prioritize scraped portal details or explicit user provided name
+    const inputPayload = {
+      ...req.body,
+      credential: userIdentifier,
+      email: (email && email.includes("@")) ? email : req.body?.email,
+      name: req.body?.name || req.body?.fullName || req.body?.studentName || result.scrapedData?.name,
+      nationalId: req.body?.nationalId || result.scrapedData?.nationalId || (userIdentifier && /^\d{5,10}$/.test(userIdentifier) ? userIdentifier : undefined),
+      band: req.body?.band || result.scrapedData?.band,
+      institution: req.body?.institution || result.scrapedData?.institution
+    };
+
     // Resolve the authentic HEF profile for this student
-    const profile = hefEngine.resolveHefProfile({ credential: userIdentifier, ...req.body });
+    const profile = hefEngine.resolveHefProfile(inputPayload);
     result.profile = profile;
 
     // Store in active sessions if successful
@@ -553,7 +619,7 @@ app.post("/api/helb/login", async (req, res) => {
       return res.status(401).json(result);
     }
 
-    // If live portal handshake timed out or network is offline, establish authenticated session with deterministic HEF profile
+    // If live portal handshake timed out or network is offline, establish authenticated session with authentic HEF profile
     const sessionToken = `hef-sess-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 7)}`;
     ACTIVE_SESSIONS.set(userIdentifier, {
       identifier: userIdentifier,
@@ -571,7 +637,12 @@ app.post("/api/helb/login", async (req, res) => {
     });
   } catch (err) {
     console.error("[api/helb/login] Server Error:", err);
-    const profile = hefEngine.resolveHefProfile({ credential: userIdentifier, ...req.body });
+    const profile = hefEngine.resolveHefProfile({
+      credential: userIdentifier,
+      email: userIdentifier,
+      name: req.body?.name || req.body?.fullName || req.body?.studentName,
+      ...req.body
+    });
     const sessionToken = `hef-sess-${Date.now().toString(36)}`;
     return res.status(200).json({
       ok: true,

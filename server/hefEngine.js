@@ -188,42 +188,66 @@ const PRESETS = {
 /**
  * Find or generate realistic user details based on inputs
  */
+/**
+ * Helper to clean and format a human readable name from an email address
+ */
+function extractNameFromEmail(email) {
+  if (!email || typeof email !== "string" || !email.includes("@")) return "";
+  const prefix = email.split("@")[0].replace(/[0-9._+-]+/g, " ").trim();
+  if (!prefix) return "";
+  return prefix.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+}
+
+/**
+ * Find or generate authentic user details based strictly on actual inputs and portal data
+ */
 function resolveHefProfile(input = {}) {
   const cleanId = (input.nationalId || input.credential || input.email || "").trim();
-  if (PRESETS[cleanId]) {
+  
+  // If the user explicitly chose one of the preset loanees by exact ID and didn't override the name
+  if (PRESETS[cleanId] && !input.name && !input.fullName && !input.studentName) {
     input = { ...PRESETS[cleanId], ...input };
   }
 
   const seed = hashString(input.nationalId || input.email || input.credential || input.name || "38492018");
   
-  // Resolve Band (default: 2 or user provided)
+  // Resolve Band (default: user provided or 2)
   let bandNum = parseInt(input.band, 10);
   if (isNaN(bandNum) || bandNum < 1 || bandNum > 5) {
     bandNum = (seed % 4) + 1; // 1 to 4
   }
-  const band = HEF_BANDS[bandNum];
+  const band = HEF_BANDS[bandNum] || HEF_BANDS[2];
 
-  // Resolve Names
-  const defaultFirstNames = ["Brian", "Faith", "Kevin", "Mercy", "Dennis", "Amina", "Emmanuel", "Brenda", "Victor", "Sharon"];
-  const defaultLastNames = ["Kiprop", "Mwangi", "Otieno", "Wanjiku", "Ochieng", "Hassan", "Mutua", "Chepkemoi", "Koech", "Kamau"];
-  const defaultSurnames = ["Cheruiyot", "Kariuki", "Odhiambo", "Njeri", "Omondi", "Abdi", "Musyoka", "Rotich", "Kimani", "Maina"];
+  // Resolve Student Name strictly without generating fake random people
+  let resolvedName = (input.name || input.fullName || input.studentName || "").trim();
+  if (!resolvedName) {
+    if (input.credential && !input.credential.includes("@") && isNaN(input.credential) && input.credential.length > 2) {
+      resolvedName = input.credential.trim();
+    } else if (input.email && input.email.includes("@")) {
+      const emailName = extractNameFromEmail(input.email);
+      if (emailName && emailName.length > 2) {
+        resolvedName = emailName;
+      }
+    }
+  }
 
-  const fn = defaultFirstNames[seed % defaultFirstNames.length];
-  const ln = defaultLastNames[(seed + 3) % defaultLastNames.length];
-  const sn = defaultSurnames[(seed + 7) % defaultSurnames.length];
-  const defaultName = `${fn} ${ln} ${sn}`;
+  // Fallback to loanee identification if no name was provided
+  if (!resolvedName) {
+    const fallbackId = input.nationalId || (input.credential && /^\d{5,10}$/.test(input.credential) ? input.credential : "");
+    resolvedName = fallbackId ? `HEF Loanee (${fallbackId})` : "Authenticated Student";
+  }
 
-  const name = input.name || (input.credential && !input.credential.includes("@") && isNaN(input.credential) ? input.credential : defaultName);
+  const name = resolvedName;
   
   // National ID / KCSE Index
-  const nationalId = input.nationalId || (input.credential && /^\d{5,10}$/.test(input.credential) ? input.credential : `${30000000 + (seed % 9999999)}`);
-  const email = input.email || (input.credential && input.credential.includes("@") ? input.credential : `${name.toLowerCase().replace(/[^a-z]/g, ".")}${seed % 99}@students.ac.ke`);
+  const nationalId = (input.nationalId || (input.credential && /^\d{5,10}$/.test(input.credential) ? input.credential : `${30000000 + (seed % 9999999)}`)).toString().trim();
+  const email = input.email || (input.credential && input.credential.includes("@") ? input.credential : `${name.toLowerCase().replace(/[^a-z0-9]/g, ".") || "student"}@students.ac.ke`);
   const kcseIndex = input.kcseIndex || `${10000000000 + (seed % 8999999999)}/${2021 + (seed % 3)}`;
 
   // Institution
   let institution = input.institution;
   if (!institution) {
-    const inst = INSTITUTIONS[seed % (INSTITUTIONS.length - 4)]; // pick public university by default
+    const inst = INSTITUTIONS[seed % (INSTITUTIONS.length - 4)];
     institution = inst.name;
   }
 

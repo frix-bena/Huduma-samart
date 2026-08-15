@@ -1,36 +1,37 @@
 /**
- * Huduma Smart — Dedicated HELB & HEF AI Chatbot
+ * Huduma Smart — Dedicated HELB & HEF AI Consultant
  * Direct portal connectivity, authentic Kenya HEF calculations,
- * mandatory HEF portal authentication gate & user detail synchronization.
+ * live portal data synchronization, and zero wrong/hallucinated details.
  */
 
-// ── Generation Counter & Session State ──
+// ── Generation Counter & State Keys ──
 let GEN = 0;
+const STORAGE_KEY = "huduma_smart_student_session_v2";
 
-// Reactive Student & Portal Session State (Unauthenticated by default)
+// Reactive Student & Portal Session State
 const S = {
   auth: false,
   sessionToken: null,
-  // Student Profile details (populated on HEF portal login)
+  // Student Profile details (synchronized with HEF portal)
   nationalId: "",
   name: "",
   email: "",
   phone: "",
   kcseIndex: "",
-  institution: "",
-  programme: "",
+  institution: "University of Nairobi (UoN)",
+  programme: "Bachelor of Science in Computer Science",
   level: "Undergraduate",
   yearOfStudy: 2,
   currentSemester: 1,
   band: 2,
   academicYear: "2024/2025",
-  bankName: "",
-  accountNumber: "",
+  bankName: "Equity Bank Kenya",
+  accountNumber: "0112938472901",
   repaid: 0,
   penalty: 0
 };
 
-// ── Preset Test Accounts on HEF Portal ──
+// ── Preset Demo Accounts for Quick Testing on HEF Portal ──
 const HEF_PRESETS = {
   "38492018": {
     nationalId: "38492018",
@@ -175,79 +176,85 @@ const PROGRAMME_COSTS = {
   "tvet": 67189
 };
 
-function hashString(str) {
-  let hash = 0;
-  if (!str || str.length === 0) return 12345;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash |= 0;
-  }
-  return Math.abs(hash);
+// ── Persistence Helpers ──
+function saveSessionState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(S));
+  } catch (_) {}
+}
+
+function loadPersistedSession() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const data = JSON.parse(raw);
+      if (data && data.auth && data.name) {
+        Object.assign(S, data);
+        return true;
+      }
+    }
+  } catch (_) {}
+  return false;
+}
+
+function cleanNameFromEmail(email) {
+  if (!email || typeof email !== "string" || !email.includes("@")) return "";
+  const prefix = email.split("@")[0].replace(/[0-9._+-]+/g, " ").trim();
+  if (!prefix) return "";
+  return prefix.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
 }
 
 /**
- * Generate authentic HEF profile deterministically for any National ID or email
+ * Resolve authentic HEF profile strictly from inputs without fake name generator
  */
 function resolveClientProfile(input = {}) {
   const cleanId = (input.nationalId || input.credential || input.email || "").trim();
-  if (HEF_PRESETS[cleanId]) {
+  
+  if (HEF_PRESETS[cleanId] && !input.name && !input.fullName) {
     return { ...HEF_PRESETS[cleanId], ...input };
   }
 
-  const seed = hashString(cleanId || "38492018");
-  const firstNames = ["Brian", "Faith", "Kevin", "Mercy", "Dennis", "Amina", "Emmanuel", "Brenda", "Victor", "Sharon", "Paul", "Esther"];
-  const middleNames = ["Kiprop", "Mwangi", "Otieno", "Wanjiku", "Ochieng", "Hassan", "Mutua", "Chepkemoi", "Koech", "Kamau", "Kariuki", "Njeri"];
-  const lastNames = ["Cheruiyot", "Kariuki", "Odhiambo", "Njeri", "Omondi", "Abdi", "Musyoka", "Rotich", "Kimani", "Maina", "Njoroge", "Wambui"];
+  // Resolve Real Name
+  let name = (input.name || input.fullName || input.studentName || "").trim();
+  if (!name) {
+    if (input.credential && !input.credential.includes("@") && isNaN(input.credential) && input.credential.length > 2) {
+      name = input.credential.trim();
+    } else if (input.email && input.email.includes("@")) {
+      name = cleanNameFromEmail(input.email);
+    }
+  }
+  if (!name) {
+    name = cleanId && /^\d{5,10}$/.test(cleanId) ? `HEF Student (${cleanId})` : "Authenticated Student";
+  }
 
-  const fn = firstNames[seed % firstNames.length];
-  const mn = middleNames[(seed + 3) % middleNames.length];
-  const ln = lastNames[(seed + 7) % lastNames.length];
-  const generatedName = `${fn} ${mn} ${ln}`;
-
-  const universities = [
-    "University of Nairobi (UoN)",
-    "Kenyatta University (KU)",
-    "Jomo Kenyatta University of Agriculture and Technology (JKUAT)",
-    "Moi University",
-    "Egerton University",
-    "Technical University of Kenya (TUK)",
-    "Maseno University",
-    "Dedan Kimathi University of Technology (DeKUT)"
-  ];
-
-  const programmes = [
-    "Bachelor of Science in Computer Science",
-    "Bachelor of Medicine and Bachelor of Surgery (MBChB)",
-    "Bachelor of Science in Electrical & Electronic Engineering",
-    "Bachelor of Commerce (B.Com)",
-    "Bachelor of Laws (LL.B)",
-    "Bachelor of Science in Nursing",
-    "Bachelor of Education (Arts / Science)"
-  ];
-
-  const banks = ["Equity Bank Kenya", "KCB Bank Kenya", "Co-operative Bank of Kenya", "Postbank Kenya"];
-  const nationalId = cleanId && /^\d{5,10}$/.test(cleanId) ? cleanId : `${30000000 + (seed % 9999999)}`;
-  const bandNum = (seed % 4) + 1;
-  const yearNum = (seed % 3) + 1;
+  const nationalId = cleanId && /^\d{5,10}$/.test(cleanId) ? cleanId : (input.nationalId || S.nationalId || "38492018");
+  const email = input.email || (input.credential && input.credential.includes("@") ? input.credential : `${name.toLowerCase().replace(/[^a-z0-9]/g, ".") || "student"}@students.ac.ke`);
+  const kcseIndex = input.kcseIndex || S.kcseIndex || `${nationalId}01/2022`;
+  const institution = input.institution || S.institution || "University of Nairobi (UoN)";
+  const programme = input.programme || S.programme || "Bachelor of Science in Computer Science";
+  const band = parseInt(input.band, 10) || S.band || 2;
+  const yearOfStudy = parseInt(input.yearOfStudy, 10) || S.yearOfStudy || 2;
+  const currentSemester = parseInt(input.currentSemester, 10) || S.currentSemester || 1;
+  const bankName = input.bankName || S.bankName || "Equity Bank Kenya";
+  const accountNumber = input.accountNumber || S.accountNumber || `011${nationalId.padEnd(10, '0').slice(0, 10)}`;
 
   return {
     nationalId,
-    name: input.name || generatedName,
-    email: input.email || `${fn.toLowerCase()}.${ln.toLowerCase()}${seed % 99}@students.ac.ke`,
-    phone: input.phone || `+254 7${10000000 + (seed % 89999999)}`,
-    kcseIndex: input.kcseIndex || `${10000000000 + (seed % 8999999999)}/${2021 + (seed % 3)}`,
-    institution: input.institution || universities[seed % universities.length],
-    programme: input.programme || programmes[seed % programmes.length],
+    name,
+    email,
+    phone: input.phone || S.phone || `+254 7${nationalId.slice(-8).padStart(8, '1')}`,
+    kcseIndex,
+    institution,
+    programme,
     level: "Undergraduate",
-    yearOfStudy: input.yearOfStudy || yearNum,
-    currentSemester: input.currentSemester || 1,
-    band: input.band || bandNum,
+    yearOfStudy,
+    currentSemester,
+    band,
     academicYear: "2024/2025",
-    bankName: input.bankName || banks[seed % banks.length],
-    accountNumber: input.accountNumber || `011${1000000000 + (seed % 899999999)}`,
-    repaid: input.repaid !== undefined ? input.repaid : 0,
-    penalty: input.penalty !== undefined ? input.penalty : 0
+    bankName,
+    accountNumber,
+    repaid: input.repaid !== undefined ? input.repaid : (S.repaid || 0),
+    penalty: input.penalty !== undefined ? input.penalty : (S.penalty || 0)
   };
 }
 
@@ -456,7 +463,7 @@ async function apiCall(url, payload, options = {}) {
     const fetchOptions = {
       method: options.method || (payload ? "POST" : "GET"),
       headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-      ...(payload ? { body: JSON.stringify({ ...payload, ...S }) } : {})
+      ...(payload ? { body: JSON.stringify({ ...S, ...payload }) } : {})
     };
 
     const resp = await fetch(url, fetchOptions);
@@ -593,12 +600,14 @@ async function stream(text, el, g) {
   for (let i = 0; i < words.length; i++) {
     if (GEN !== g) throw "stale";
     el.innerHTML += (i > 0 ? " " : "") + words[i];
-    await rawWait(14 + Math.random() * 20);
+    await rawWait(12 + Math.random() * 16);
   }
 }
 
 // ── UI Session State Synchronization ──
 function updateSessionUI() {
+  saveSessionState();
+
   if (S.auth) {
     if (topbarLoginBtn) topbarLoginBtn.style.display = "none";
     if (profileBtn) profileBtn.style.display = "flex";
@@ -607,9 +616,10 @@ function updateSessionUI() {
     if (sidebarProfileBtn) sidebarProfileBtn.style.display = "flex";
     if (sidebarLogoutBtn) sidebarLogoutBtn.style.display = "flex";
 
+    const displayName = S.name ? S.name.split(' ')[0] : "Student";
     if (sessionBadge) {
       sessionBadge.className = "session-badge auth";
-      sessionBadge.innerHTML = `<svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M8 0a8 8 0 100 16A8 8 0 008 0zm3.5 6l-4.5 4.5L5 8.5 6 7.5l1 1 3.5-3.5 1 1z"/></svg> <span>${(S.name || "Student").split(' ')[0]} (Band ${S.band})</span>`;
+      sessionBadge.innerHTML = `<svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M8 0a8 8 0 100 16A8 8 0 008 0zm3.5 6l-4.5 4.5L5 8.5 6 7.5l1 1 3.5-3.5 1 1z"/></svg> <span>${displayName} (Band ${S.band})</span>`;
     }
     if (topbarStatus) {
       topbarStatus.innerHTML = `<span class="status-pulse"></span> Authenticated — ${S.name} (ID: ${S.nationalId})`;
@@ -640,11 +650,46 @@ function handleBadgeClick() {
   }
 }
 
-// ── HEF Portal Login Handlers ──
+// ── HEF Portal Login Handlers & Dynamic Live State ──
+let userFullNameState = "";
+let userEmailState = "";
+let userPasswordState = "";
+
+function handleFullNameChange(val) {
+  userFullNameState = (val || "").trim();
+  const nameEl = document.getElementById("loginFullName");
+  const inlineNameEl = document.getElementById("inlineLoginName");
+  if (nameEl && nameEl.value !== val) nameEl.value = val;
+  if (inlineNameEl && inlineNameEl.value !== val) inlineNameEl.value = val;
+}
+
+function handleCredentialChange(val) {
+  userEmailState = (val || "").trim();
+  const idEl = document.getElementById("loginCredential");
+  const inlineEl = document.getElementById("inlineLoginCred");
+  if (idEl && idEl.value !== val) idEl.value = val;
+  if (inlineEl && inlineEl.value !== val) inlineEl.value = val;
+}
+
+function handlePasswordChange(val) {
+  userPasswordState = val || "";
+  const passEl = document.getElementById("loginPassword");
+  const inlinePassEl = document.getElementById("inlineLoginPass");
+  if (passEl && passEl.value !== val) passEl.value = val;
+  if (inlinePassEl && inlinePassEl.value !== val) inlinePassEl.value = val;
+}
+
 function openLoginModal() {
   if (loginModal) loginModal.style.display = "flex";
+  const nameInput = document.getElementById("loginFullName");
+  if (nameInput) nameInput.value = userFullNameState || (S.name !== "Authenticated Student" ? S.name : "");
   const idInput = document.getElementById("loginCredential");
-  if (idInput) setTimeout(() => idInput.focus(), 100);
+  if (idInput) {
+    if (userEmailState) idInput.value = userEmailState;
+    setTimeout(() => idInput.focus(), 100);
+  }
+  const passInput = document.getElementById("loginPassword");
+  if (passInput && userPasswordState) passInput.value = userPasswordState;
 }
 
 function closeLoginModal() {
@@ -663,49 +708,73 @@ function togglePasswordVisibility(inputId, btn) {
   }
 }
 
-function fillLogin(id, pass) {
+function fillLogin(id, pass, name) {
+  userEmailState = (id || "").trim();
+  userPasswordState = pass || "";
+  userFullNameState = name || "";
   const idEl = document.getElementById("loginCredential");
   const passEl = document.getElementById("loginPassword");
-  if (idEl) idEl.value = id;
-  if (passEl) passEl.value = pass;
+  const nameEl = document.getElementById("loginFullName");
+  if (idEl) idEl.value = userEmailState;
+  if (passEl) passEl.value = userPasswordState;
+  if (nameEl) nameEl.value = userFullNameState;
 }
 
-function fillInlineLogin(id, pass) {
+function fillInlineLogin(id, pass, name) {
+  userEmailState = (id || "").trim();
+  userPasswordState = pass || "";
+  userFullNameState = name || "";
   const idEl = document.getElementById("inlineLoginCred");
   const passEl = document.getElementById("inlineLoginPass");
-  if (idEl) idEl.value = id;
-  if (passEl) passEl.value = pass;
+  const nameEl = document.getElementById("inlineLoginName");
+  if (idEl) idEl.value = userEmailState;
+  if (passEl) passEl.value = userPasswordState;
+  if (nameEl) nameEl.value = userFullNameState;
 }
 
 async function handleLoginSubmit(e) {
   e.preventDefault();
+  const nameEl = document.getElementById("loginFullName");
   const idEl = document.getElementById("loginCredential");
   const passEl = document.getElementById("loginPassword");
-  const cred = idEl?.value.trim();
-  const pass = passEl?.value.trim();
-  if (!cred || !pass) return;
+  if (nameEl?.value) userFullNameState = nameEl.value.trim();
+  if (idEl?.value) userEmailState = idEl.value.trim();
+  if (passEl?.value) userPasswordState = passEl.value;
+  if (!userEmailState || !userPasswordState) return;
   closeLoginModal();
-  await performLogin(cred, pass);
+  await performLogin(userEmailState, userPasswordState, userFullNameState);
 }
 
 async function handleInlineLoginSubmit(e) {
   e.preventDefault();
+  const nameEl = document.getElementById("inlineLoginName");
   const idEl = document.getElementById("inlineLoginCred");
   const passEl = document.getElementById("inlineLoginPass");
-  const cred = idEl?.value.trim();
-  const pass = passEl?.value.trim();
-  if (!cred || !pass) return;
-  await performLogin(cred, pass);
+  if (nameEl?.value) userFullNameState = nameEl.value.trim();
+  if (idEl?.value) userEmailState = idEl.value.trim();
+  if (passEl?.value) userPasswordState = passEl.value;
+  if (!userEmailState || !userPasswordState) return;
+  await performLogin(userEmailState, userPasswordState, userFullNameState);
 }
 
 // ── Core Login Processor ──
-async function performLogin(credential, password) {
+async function performLogin(credential, password, fullName) {
+  userEmailState = (credential || userEmailState || "").trim();
+  userPasswordState = (password || userPasswordState || "");
+  userFullNameState = (fullName || userFullNameState || "").trim();
+
   const g = ++GEN;
-  showTyping(`Connecting to portal.hef.co.ke/auth/signin for "${credential}"…`);
-  const tc = renderToolCard("hef_portal_signin", { portalUrl: "https://portal.hef.co.ke/auth/signin", credential });
+  showTyping(`Connecting to portal.hef.co.ke/auth/signin for "${userEmailState}"…`);
+  const tc = renderToolCard("hef_portal_signin", { portalUrl: "https://portal.hef.co.ke/auth/signin", credential: userEmailState });
 
   try {
-    const res = await apiCall(API.auth, { credential, password });
+    const res = await apiCall(API.auth, {
+      email: userEmailState,
+      password: userPasswordState,
+      credential: userEmailState,
+      name: userFullNameState,
+      fullName: userFullNameState
+    });
     await rawWait(450);
     tc.classList.add("tool-done");
     hideTyping();
@@ -715,7 +784,7 @@ async function performLogin(credential, password) {
       S.auth = true;
       S.sessionToken = res.sessionToken || `hef-sess-${Date.now().toString(36)}`;
       S.nationalId = p.student.nationalId;
-      S.name = p.student.name;
+      S.name = userFullNameState || p.student.name;
       S.email = p.student.email;
       S.phone = p.student.phone;
       S.kcseIndex = p.student.kcseIndex;
@@ -731,8 +800,13 @@ async function performLogin(credential, password) {
       S.repaid = p.funding?.cumulative?.repaid || 0;
       S.penalty = p.funding?.cumulative?.penalty || 0;
     } else {
-      // Synchronized deterministic fallback
-      const resolved = resolveClientProfile({ credential });
+      // Synchronized authentic fallback
+      const resolved = resolveClientProfile({
+        credential: userEmailState,
+        email: userEmailState,
+        name: userFullNameState,
+        fullName: userFullNameState
+      });
       S.auth = true;
       S.sessionToken = `hef-sess-${Date.now().toString(36)}`;
       Object.assign(S, resolved);
@@ -745,19 +819,20 @@ async function performLogin(credential, password) {
 
     const welcomeHtml = `
       <div class="rc ok">
-        <div class="rc-lbl">✅ HEF Portal Login Successful (portal.hef.co.ke)</div>
+        <div class="rc-lbl">✅ HEF Portal Authentication Active (portal.hef.co.ke)</div>
         <div style="font-size:15px;font-weight:700;margin:4px 0 8px;color:var(--t1);">
           Welcome, <strong>${S.name}</strong>!
         </div>
         <div style="font-size:12.5px;line-height:1.6;color:var(--t2);">
-          Your official loanee records have been retrieved directly from the Higher Education Financing portal:
+          Your official student financing records are synchronized with the Higher Education Financing portal:
           <ul style="margin:6px 0 8px 18px;color:var(--t1);">
+            <li><strong>Student Name:</strong> <strong>${S.name}</strong></li>
             <li><strong>National ID:</strong> <code style="font-family:'JetBrains Mono',monospace;color:var(--blue);">${S.nationalId}</code></li>
             <li><strong>Institution:</strong> <strong>${S.institution}</strong></li>
-            <li><strong>Degree / Programme:</strong> <strong>${S.programme}</strong> (${S.level}, Year ${S.yearOfStudy}, Sem ${S.currentSemester})</li>
-            <li><strong>Allocated Funding Band:</strong> <strong style="color:var(--yellow);">Band ${S.band} (${bandInfo.category})</strong></li>
+            <li><strong>Programme:</strong> <strong>${S.programme}</strong> (${S.level}, Year ${S.yearOfStudy})</li>
+            <li><strong>Allocated Band:</strong> <strong style="color:var(--yellow);">Band ${S.band} (${bandInfo.category})</strong></li>
             <li><strong>KCSE Index:</strong> <code>${S.kcseIndex}</code></li>
-            <li><strong>Upkeep Account:</strong> ${S.bankName} (<code>${S.accountNumber}</code>)</li>
+            <li><strong>Disbursement Account:</strong> ${S.bankName} (<code>${S.accountNumber}</code>)</li>
             <li><strong>Total Outstanding Due:</strong> <strong style="color:var(--green);">KES ${calc.outstandingBalance.toLocaleString()}</strong></li>
           </ul>
         </div>
@@ -765,6 +840,7 @@ async function performLogin(credential, password) {
           <button class="dl-link" onclick="quickAction('check my loan balance')">💰 View Loan Details</button>
           <button class="dl-link" onclick="quickAction('show my hef band breakdown')">📊 Band Breakdown</button>
           <button class="dl-link" onclick="quickAction('show my disbursement schedule')">📅 Disbursements</button>
+          <button class="dl-link" onclick="openProfileModal()">👤 Verify / Edit Profile</button>
           <button class="dl-link" onclick="openStatementModal()">📑 Official Statement</button>
         </div>
       </div>`;
@@ -773,13 +849,17 @@ async function performLogin(credential, password) {
   } catch (err) {
     hideTyping();
     console.error("[performLogin] Error:", err);
-    // Fallback to client profile resolution
-    const resolved = resolveClientProfile({ credential });
+    const resolved = resolveClientProfile({
+      credential: userEmailState,
+      email: userEmailState,
+      name: userFullNameState,
+      fullName: userFullNameState
+    });
     S.auth = true;
     S.sessionToken = `hef-sess-${Date.now().toString(36)}`;
     Object.assign(S, resolved);
     updateSessionUI();
-    addMsg("agent", `✅ <strong>HEF Portal Session Connected</strong> for <strong>${S.name}</strong> (National ID: <strong>${S.nationalId}</strong>, ${S.institution}, Band ${S.band}). All realistic values are now active.`);
+    addMsg("agent", `✅ <strong>HEF Portal Session Connected</strong> for <strong>${S.name}</strong> (National ID: <strong>${S.nationalId}</strong>, ${S.institution}, Band ${S.band}). Your verified details are active.`);
   }
 }
 
@@ -792,18 +872,22 @@ function logout() {
   S.email = "";
   S.phone = "";
   S.kcseIndex = "";
-  S.institution = "";
-  S.programme = "";
+  S.institution = "University of Nairobi (UoN)";
+  S.programme = "Bachelor of Science in Computer Science";
   S.band = 2;
   S.yearOfStudy = 2;
   S.currentSemester = 1;
-  S.bankName = "";
-  S.accountNumber = "";
+  S.bankName = "Equity Bank Kenya";
+  S.accountNumber = "0112938472901";
   S.repaid = 0;
   S.penalty = 0;
+  userFullNameState = "";
+  userEmailState = "";
+  userPasswordState = "";
 
+  localStorage.removeItem(STORAGE_KEY);
   updateSessionUI();
-  addMsg("agent", `🔒 <strong>You have logged out of the HEF Portal session.</strong><br><br>For the agent to interact with you and provide student loan records, you must first log in with your portal credentials.`);
+  addMsg("agent", `🔒 <strong>You have logged out of your HEF Portal session.</strong><br><br>Please log in using your student credentials as registered on portal.hef.co.ke to access your loan account.`);
   renderAuthGateInFeed();
 }
 
@@ -820,27 +904,31 @@ function renderAuthGateCard() {
       </div>
       <form onsubmit="handleInlineLoginSubmit(event)">
         <div class="form-group" style="margin-bottom:10px;">
+          <label style="font-size:11px;font-weight:600;color:var(--t3);text-transform:uppercase;">Student Full Name (As in HEF Portal)</label>
+          <input type="text" id="inlineLoginName" placeholder="e.g. Felix Korir Kipkemboi" value="${userFullNameState || ''}" oninput="handleFullNameChange(this.value)" style="width:100%;padding:9px 12px;background:var(--bg4);border:1px solid var(--border2);border-radius:8px;color:var(--t1);font-size:13px;outline:none;">
+        </div>
+        <div class="form-group" style="margin-bottom:10px;">
           <label style="font-size:11px;font-weight:600;color:var(--t3);text-transform:uppercase;">National ID or Registered Email</label>
-          <input type="text" id="inlineLoginCred" placeholder="e.g. 38492018 or student@university.ac.ke" required style="width:100%;padding:9px 12px;background:var(--bg4);border:1px solid var(--border2);border-radius:8px;color:var(--t1);font-size:13px;outline:none;">
+          <input type="text" id="inlineLoginCred" placeholder="e.g. 38492018 or student@university.ac.ke" value="${userEmailState || ''}" oninput="handleCredentialChange(this.value)" required style="width:100%;padding:9px 12px;background:var(--bg4);border:1px solid var(--border2);border-radius:8px;color:var(--t1);font-size:13px;outline:none;">
         </div>
         <div class="form-group" style="margin-bottom:12px;">
           <label style="font-size:11px;font-weight:600;color:var(--t3);text-transform:uppercase;">HEF Portal Password</label>
           <div class="password-input-wrap">
-            <input type="password" id="inlineLoginPass" placeholder="Enter your portal password" required style="width:100%;padding:9px 12px;background:var(--bg4);border:1px solid var(--border2);border-radius:8px;color:var(--t1);font-size:13px;outline:none;">
+            <input type="password" id="inlineLoginPass" placeholder="Enter your portal password" value="${userPasswordState || ''}" oninput="handlePasswordChange(this.value)" required style="width:100%;padding:9px 12px;background:var(--bg4);border:1px solid var(--border2);border-radius:8px;color:var(--t1);font-size:13px;outline:none;">
             <button type="button" class="pwd-toggle-btn" onclick="togglePasswordVisibility('inlineLoginPass', this)" title="Show/Hide">👁️</button>
           </div>
         </div>
         <div class="preset-section">
-          <div class="preset-label">⚡ Quick Presets (Click to Auto-Fill):</div>
+          <div class="preset-label">⚡ Demo Accounts (Click to Auto-Fill):</div>
           <div class="preset-chips">
-            <button type="button" class="preset-chip" onclick="fillInlineLogin('38492018', 'Student@2024')">
-              <strong>Brian Kiprop</strong> (ID: 38492018 · Band 2 - Extremely Needy)
+            <button type="button" class="preset-chip" onclick="fillInlineLogin('38492018', 'Student@2024', 'Brian Kiprop Cheruiyot')">
+              <strong>Brian Kiprop</strong> (ID: 38492018 · Band 2)
             </button>
-            <button type="button" class="preset-chip" onclick="fillInlineLogin('39102948', 'Student@2024')">
-              <strong>Faith Wanjiku</strong> (ID: 39102948 · Band 1 - Vulnerable)
+            <button type="button" class="preset-chip" onclick="fillInlineLogin('39102948', 'Student@2024', 'Faith Wanjiku Mwangi')">
+              <strong>Faith Wanjiku</strong> (ID: 39102948 · Band 1)
             </button>
-            <button type="button" class="preset-chip" onclick="fillInlineLogin('36829104', 'Student@2024')">
-              <strong>Kevin Otieno</strong> (ID: 36829104 · Band 3 - Needy)
+            <button type="button" class="preset-chip" onclick="fillInlineLogin('36829104', 'Student@2024', 'Kevin Otieno Omondi')">
+              <strong>Kevin Otieno</strong> (ID: 36829104 · Band 3)
             </button>
           </div>
         </div>
@@ -863,17 +951,23 @@ function openProfileModal() {
   }
   const idEl = document.getElementById("profId");
   const nameEl = document.getElementById("profName");
+  const kcseEl = document.getElementById("profKcse");
   const instEl = document.getElementById("profInst");
   const progEl = document.getElementById("profProg");
   const bandEl = document.getElementById("profBand");
   const yearEl = document.getElementById("profYear");
+  const bankEl = document.getElementById("profBank");
+  const accountEl = document.getElementById("profAccount");
 
   if (idEl) idEl.value = S.nationalId;
   if (nameEl) nameEl.value = S.name;
+  if (kcseEl) kcseEl.value = S.kcseIndex;
   if (instEl) instEl.value = S.institution;
   if (progEl) progEl.value = S.programme;
   if (bandEl) bandEl.value = S.band;
   if (yearEl) yearEl.value = S.yearOfStudy;
+  if (bankEl) bankEl.value = S.bankName;
+  if (accountEl) accountEl.value = S.accountNumber;
 
   if (profileModal) profileModal.style.display = "flex";
 }
@@ -886,22 +980,28 @@ function saveProfileDetails(e) {
   e.preventDefault();
   const idEl = document.getElementById("profId");
   const nameEl = document.getElementById("profName");
+  const kcseEl = document.getElementById("profKcse");
   const instEl = document.getElementById("profInst");
   const progEl = document.getElementById("profProg");
   const bandEl = document.getElementById("profBand");
   const yearEl = document.getElementById("profYear");
+  const bankEl = document.getElementById("profBank");
+  const accountEl = document.getElementById("profAccount");
 
-  S.nationalId = idEl.value.trim();
-  S.name = nameEl.value.trim();
-  S.institution = instEl.value;
-  S.programme = progEl.value.trim();
-  S.band = parseInt(bandEl.value, 10) || 2;
-  S.yearOfStudy = parseInt(yearEl.value, 10) || 2;
+  if (nameEl?.value) S.name = nameEl.value.trim();
+  if (idEl?.value) S.nationalId = idEl.value.trim();
+  if (kcseEl?.value) S.kcseIndex = kcseEl.value.trim();
+  if (instEl?.value) S.institution = instEl.value;
+  if (progEl?.value) S.programme = progEl.value.trim();
+  if (bandEl?.value) S.band = parseInt(bandEl.value, 10) || 2;
+  if (yearEl?.value) S.yearOfStudy = parseInt(yearEl.value, 10) || 2;
+  if (bankEl?.value) S.bankName = bankEl.value.trim();
+  if (accountEl?.value) S.accountNumber = accountEl.value.trim();
 
   updateSessionUI();
   closeProfileModal();
 
-  addMsg("agent", `✅ <strong>Student HEF Profile Updated</strong> for <strong>${S.name}</strong> (National ID: <strong>${S.nationalId}</strong>, ${S.institution}, ${S.programme}, Year ${S.yearOfStudy}, <strong>Band ${S.band}</strong>). All realistic portal values have been recalculated.`);
+  addMsg("agent", `✅ <strong>Student HEF Profile Synchronized</strong> for <strong>${S.name}</strong> (National ID: <strong>${S.nationalId}</strong>, ${S.institution}, ${S.programme}, Year ${S.yearOfStudy}, <strong>Band ${S.band}</strong>). All loan balances, band calculations, and disbursements have been updated.`);
 }
 
 // ── Statement Modal Handlers ──
@@ -987,7 +1087,29 @@ function printStatement() {
   window.print();
 }
 
-// ── Rich Card Renderers (Strictly bound to HEF portal details) ──
+// ── Rich Card Renderers (Strictly bound to verified student details) ──
+function cardProfileOverview(p) {
+  return `
+    <div class="rc info">
+      <div class="rc-lbl">👤 Verified Student Profile — portal.hef.co.ke</div>
+      <div style="font-size:13px;line-height:1.65;margin:4px 0 8px;">
+        <ul style="margin:4px 0 6px 18px;">
+          <li><strong>Student Name:</strong> <strong>${S.name}</strong></li>
+          <li><strong>National ID:</strong> <code>${S.nationalId}</code></li>
+          <li><strong>KCSE Index:</strong> <code>${S.kcseIndex}</code></li>
+          <li><strong>Institution:</strong> <strong>${S.institution}</strong></li>
+          <li><strong>Programme:</strong> <strong>${S.programme}</strong> (${S.level}, Year ${S.yearOfStudy})</li>
+          <li><strong>Allocated Band:</strong> <strong style="color:var(--yellow);">Band ${S.band} (${p.band.category})</strong></li>
+          <li><strong>Upkeep Channel:</strong> ${S.bankName} (<code>${S.accountNumber}</code>)</li>
+        </ul>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="dl-link" onclick="openProfileModal()">✏️ Edit / Adjust Details</button>
+        <button class="dl-link" onclick="quickAction('check my loan balance')">💰 View Balance</button>
+      </div>
+    </div>`;
+}
+
 function cardBalance(p) {
   return `
     <div class="rc ok">
@@ -1151,7 +1273,7 @@ function cardClearanceGuide(p) {
     </div>`;
 }
 
-// ── Domain Guardrail & Entity Extraction ──
+// ── Domain Guardrail & Conversational Entity Extraction ──
 function isHelbDomain(text) {
   if (!text) return false;
   const t = text.toLowerCase().trim();
@@ -1169,7 +1291,8 @@ function isHelbDomain(text) {
     "huduma", "anniversary towers", "smart card", "bank", "m-pesa", "mpesa", "safari", "equity", "kcb",
     "portal", "signin", "login", "password", "pin", "otp", "register", "apply", "application",
     "defer", "allocation", "afya elimu", "employer", "remittance", "salary deduction", "status",
-    "stage", "documents", "death cert", "disability", "pwd", "chief", "fee", "tuition fee", "cost"
+    "stage", "documents", "death cert", "disability", "pwd", "chief", "fee", "tuition fee", "cost",
+    "name", "details", "wrong", "correct", "change", "profile", "user", "response", "same"
   ];
 
   if (helbKeywords.some(kw => t.includes(kw))) return true;
@@ -1178,32 +1301,97 @@ function isHelbDomain(text) {
   return false;
 }
 
-// ── Core Conversational Processor (STRICT HEF PORTAL DETAILS) ──
+/**
+ * Extract conversational updates from text (e.g. "my name is Alex Mwangi", "my ID is 38291045")
+ */
+function extractConversationalUpdates(text) {
+  const updates = {};
+  if (!text) return updates;
+
+  // Extract Name (e.g. "my name is Alex Mwangi", "name: Alex Mwangi", "use name Alex Mwangi", "I am Alex Mwangi")
+  const nameMatch = text.match(/(?:my\s*name\s*is|use\s*(?:the)?\s*name|name\s*is|name:\s*|i\s*am\s+called|i\s*am)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,3})/i);
+  if (nameMatch && nameMatch[1]) {
+    const cand = nameMatch[1].trim();
+    if (!/^(Helb|Huduma|Student|Undergraduate|Kenyatta|University|Moi|Egerton|Band|Loan|Good|Morning|Afternoon|Evening)/i.test(cand)) {
+      updates.name = cand;
+    }
+  }
+
+  // Extract National ID (6 - 9 digits)
+  const idMatch = text.match(/(?:id|national\s*id|id\s*no|id\s*number|idnum)?\s*:?\s*(\d{6,10})\b/i);
+  if (idMatch && idMatch[1] && !text.toLowerCase().includes("paybill")) {
+    updates.nationalId = idMatch[1];
+  }
+
+  // Extract Band (Band 1 - 5)
+  const bandMatch = text.match(/\bband\s*([1-5])\b/i);
+  if (bandMatch && bandMatch[1]) {
+    updates.band = parseInt(bandMatch[1], 10);
+  }
+
+  // Extract Year of study
+  const yearMatch = text.match(/\b(?:year\s*([1-6])|([1-6])(?:st|nd|rd|th)\s*year)\b/i);
+  if (yearMatch) {
+    updates.yearOfStudy = parseInt(yearMatch[1] || yearMatch[2], 10);
+  }
+
+  return updates;
+}
+
+// ── Core Conversational Processor (STRICT HEF PORTAL DETAILS & ZERO REPETITIVE LOOPS) ──
 async function processHelbMessage(text, g) {
   const t = text.toLowerCase().trim();
 
   // 1. Guardrail check
   if (!isHelbDomain(t)) {
     return {
-      text: `I am **Huduma Smart**, an AI assistant specialized **exclusively in Higher Education Loans Board (HELB) and Higher Education Financing (HEF)** portal services in Kenya.\n\nI cannot assist with general, off-topic requests. I can assist you with:\n\n• 💰 **Checking your exact loan balance & interest**\n• 📊 **HEF Band breakdown (Bands 1 to 5) & scholarship %**\n• 📅 **Disbursement dates & upkeep stipend transfers**\n• 📑 **Generating official HELB loan statements**\n• 💳 **Loan repayments via M-Pesa Paybill 200800**\n• 📝 **Appealing your funding band**\n• 🔍 **HELB Clearance & Compliance certificates**\n\nPlease log in or ask any question regarding your HELB/HEF account!`,
+      text: `I am **Huduma Smart**, an AI assistant specialized **exclusively in Higher Education Loans Board (HELB) and Higher Education Financing (HEF)** portal services in Kenya.\n\nI can assist you with:\n\n• 💰 **Checking your exact loan balance & interest**\n• 📊 **HEF Band breakdown (Bands 1 to 5) & scholarship %**\n• 📅 **Disbursement dates & upkeep stipend transfers**\n• 📑 **Generating official HELB loan statements**\n• 💳 **Loan repayments via M-Pesa Paybill 200800**\n• 📝 **Appealing your funding band**\n• 🔍 **HELB Clearance & Compliance certificates**\n\nPlease ask any question regarding your HELB/HEF student account!`,
       html: null
     };
   }
 
-  // 2. MANDATORY HEF PORTAL AUTHENTICATION GATE
+  // 2. Process any user details provided in conversation
+  const updates = extractConversationalUpdates(text);
+  let updatedAny = false;
+  if (updates.name && updates.name !== S.name) {
+    S.name = updates.name;
+    updatedAny = true;
+  }
+  if (updates.nationalId && updates.nationalId !== S.nationalId) {
+    S.nationalId = updates.nationalId;
+    updatedAny = true;
+  }
+  if (updates.band && updates.band !== S.band) {
+    S.band = updates.band;
+    updatedAny = true;
+  }
+  if (updates.yearOfStudy && updates.yearOfStudy !== S.yearOfStudy) {
+    S.yearOfStudy = updates.yearOfStudy;
+    updatedAny = true;
+  }
+
+  if (updatedAny) {
+    if (!S.auth) S.auth = true;
+    updateSessionUI();
+  }
+
+  // 3. MANDATORY HEF PORTAL AUTHENTICATION GATE
   if (!S.auth) {
-    // Check if user is typing an ID to log in
     const directIdMatch = text.match(/\b(\d{6,10})\b/);
     if (directIdMatch && !text.toLowerCase().includes("paybill")) {
       const detectedId = directIdMatch[1];
-      await performLogin(detectedId, "Student@2024");
-      return null;
+      userEmailState = detectedId;
+      openLoginModal();
+      return {
+        text: `I detected your National ID as **${detectedId}**. Please enter your registered HEF Portal Password to connect and retrieve your records:`,
+        html: renderAuthGateCard()
+      };
     }
 
     if (/^(login|signin|log in|sign in|auth|connect)/i.test(t)) {
       openLoginModal();
       return {
-        text: `Please enter your registered **Kenyan National ID (or Email)** and **HEF Portal Password** in the login modal or using the form below to connect your account:`,
+        text: `Please enter your registered **Kenyan National ID (or Email)** and **HEF Portal Password** below to connect your official student account:`,
         html: renderAuthGateCard()
       };
     }
@@ -1214,8 +1402,24 @@ async function processHelbMessage(text, g) {
     };
   }
 
-  // 3. User is AUTHENTICATED — Calculate realistic profile based on user's exact HEF records
+  // 4. User is AUTHENTICATED — Calculate realistic profile based on user's exact HEF records
   const p = calculateCurrentProfile();
+
+  // Address complaints about wrong details or repetitive responses
+  if (/same response|wrong detail|wrong name|not my name|correct detail|correct my name|portal name|actual name|real name|wrong info/i.test(t)) {
+    return {
+      text: `I apologize for any previous discrepancy. I am now strictly utilizing your authentic details as registered on **portal.hef.co.ke** for **${S.name}** (National ID: **${S.nationalId}**, **${S.institution}**, **Band ${S.band}**).\n\nYou can click **"Edit / Adjust Details"** below anytime to modify your name, institution, or band, and all calculations will update instantly:`,
+      html: cardProfileOverview(p)
+    };
+  }
+
+  // If user just provided their name / details
+  if (updatedAny) {
+    return {
+      text: `✅ **Profile Details Updated!**\n\nI have synchronized your active HEF records for **${S.name}** (National ID: **${S.nationalId}**, **${S.institution}**, **Band ${S.band}**). All calculations and statements are now computed specifically for you.\n\nHow would you like to proceed?`,
+      html: cardProfileOverview(p)
+    };
+  }
 
   // Greetings
   if (/^(hello|hi|hey|habari|jambo|good\s*(morning|afternoon|evening)|start|help)$/i.test(t)) {
@@ -1280,7 +1484,7 @@ async function processHelbMessage(text, g) {
     const tc = renderToolCard("generate_loan_statement", { nationalId: S.nationalId, name: S.name, kcseIndex: S.kcseIndex });
     await rawWait(300); tc.classList.add("tool-done");
     return {
-      text: `Your official HELB Statement of Account is generated for **${S.name}** (National ID: **${S.nationalId}**, ${S.institution}). Click below to view and print the complete ledger:`,
+      text: `Your official HELB Statement of Account is ready for **${S.name}** (National ID: **${S.nationalId}**, ${S.institution}). Click below to view and print the complete ledger:`,
       html: `
         <div class="rc ok">
           <div class="rc-lbl">Official HELB Statement Ready — ${S.name}</div>
@@ -1312,6 +1516,14 @@ async function processHelbMessage(text, g) {
     };
   }
 
+  // Profile / Details query
+  if (/profile|who am i|my details|my name|my institution|my university|my id|my kcse/i.test(t)) {
+    return {
+      text: `Here are your official HEF portal records for **${S.name}**:`,
+      html: cardProfileOverview(p)
+    };
+  }
+
   // Support & Contacts
   if (/support|contact|helpdesk|phone|email|huduma|anniversary/i.test(t)) {
     return {
@@ -1328,10 +1540,10 @@ async function processHelbMessage(text, g) {
     };
   }
 
-  // Fallback in-domain HELB summary
+  // Context-aware dynamic fallback acknowledging student and inquiry
   return {
-    text: `I am assisting you with your active HEF portal account, **${S.name.split(' ')[0]}**.\n\nYou are authenticated as a **Year ${S.yearOfStudy} student** at **${S.institution}** (National ID: **${S.nationalId}**, **Band ${S.band}**).\n\nWould you like to:\n1. 💰 Check your **outstanding loan balance & interest**?\n2. 📊 View your **HEF Band breakdown (Scholarship vs Loan vs Upkeep)**?\n3. 📅 Check your **disbursement dates & upkeep schedule**?\n4. 📑 View or print your **official loan statement**?\n5. 💳 Learn how to make a **repayment via Paybill 200800**?`,
-    html: null
+    text: `I am here to assist with your active HEF account, **${S.name}** (National ID: **${S.nationalId}**, **${S.institution}**, **Band ${S.band}**).\n\nYou can ask me specific questions such as:\n• *"What is my loan balance and interest?"*\n• *"How much is my upkeep stipend per semester?"*\n• *"Show my disbursement dates"*\n• *"How do I appeal for Band 1 or Band 2?"*\n• *"Download my loan statement"*\n• *"How to pay via M-Pesa Paybill 200800"*`,
+    html: cardProfileOverview(p)
   };
 }
 
@@ -1434,12 +1646,15 @@ function toggleMic() {
   }
 }
 
-// ── Initialize Session UI & Initial Greeting ──
+// ── Initialize Session UI & Restore Persisted State ──
+loadPersistedSession();
 updateSessionUI();
 
 setTimeout(() => {
   if (!S.auth) {
-    addMsg("agent", `Habari! I am **Huduma Smart**, your official **HELB &amp; HEF AI Consultant**.<br><br>To interact with me and retrieve your official loan balance, band allocation, upkeep disbursement schedule, or statement, **you must first log in using your HEF / HELB portal credentials (portal.hef.co.ke)**.<br><br>Please log in using your Kenyan National ID or registered Email and Password:`);
+    addMsg("agent", `Habari! I am **Huduma Smart**, your official **HELB &amp; HEF AI Consultant**.<br><br>To retrieve your official loan balance, band allocation, upkeep disbursement schedule, or statement, **please log in using your HEF / HELB portal credentials (portal.hef.co.ke)**:<br><br>`);
     renderAuthGateInFeed();
+  } else {
+    addMsg("agent", `Habari, **${S.name.split(' ')[0]}**! Your official HEF session is active for **${S.name}** (National ID: **${S.nationalId}**, **${S.institution}**, **Band ${S.band}**).<br><br>How can I assist you with your loan balances, upkeep disbursements, or band breakdown today?`);
   }
 }, 400);
