@@ -657,6 +657,38 @@ async function playwrightHefLogin(email, password) {
     Object.defineProperty(navigator, "webdriver", { get: () => undefined });
   });
 
+  // ── 1. INTERCEPT INTERNAL HEF API RESPONSES ──
+  // Before triggering login or navigating to dashboard, attach response listener
+  let capturedProfileData = {};
+  let capturedAllocationData = {};
+  const capturedResponses = [];
+
+  page.on('response', async (response) => {
+    const url = response.url();
+    const contentType = response.headers()['content-type'] || '';
+    
+    if (contentType.includes('application/json') || url.includes('/api/') || url.includes('.json')) {
+      try {
+        const json = await response.json();
+        // Log endpoint for debugging
+        console.log(`[playwright-network] Captured API [${response.status()}]:`, url);
+        capturedResponses.push({ url, status: response.status(), data: json });
+        
+        // Merge data if it contains relevant student/loan keys
+        if (json.data || json.student || json.profile || json.allocations || json.loanDetails || json.applicant || json.user || json.loans || json.statement) {
+          Object.assign(capturedProfileData, json.data || json);
+          if (json.allocations || json.loanDetails) {
+            Object.assign(capturedAllocationData, json.allocations || json.loanDetails);
+          }
+        } else if (typeof json === 'object' && json !== null) {
+          Object.assign(capturedProfileData, json);
+        }
+      } catch (e) {
+        // Ignore non-JSON or stream parsing errors
+      }
+    }
+  });
+
   try {
     console.log(`[playwright-login] Navigating to ${PORTAL_BASE_URL}…`);
 
@@ -757,10 +789,53 @@ async function playwrightHefLogin(email, password) {
       } catch (_) {}
     }
 
-    // Wait for redirect to dashboard or ensure dashboard navigation
+    // Wait for redirect to portal application dashboard
     await page.waitForURL(url => !url.toString().includes("auth/signin") && !url.toString().endsWith(".ke/"), { timeout: 15000 }).catch(() => {});
-    if (!page.url().includes("student") && !page.url().includes("dashboard")) {
-      await page.goto(`${PORTAL_BASE_URL}/student/dashboard`, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(3000); // Give React/Angular SPA time to render DOM and trigger background APIs
+
+    // ── 2. SUB-ROUTE NAVIGATION & INTERACTION (If tabs exist) ──
+    let accumulatedPageText = "";
+    try {
+      const initialText = await page.locator("body").innerText().catch(async () => await page.evaluate(() => document.body.innerText).catch(() => ""));
+      if (initialText) accumulatedPageText += "\n" + initialText;
+    } catch (_) {}
+
+    const tabsToVisit = [
+      'text="Application Status"',
+      'text="Allocations"',
+      'text="Allocation"',
+      'text="Profile"',
+      'text="Disbursement"',
+      'text="Disbursements"',
+      'text="Loan Details"',
+      'text="Statement"',
+      'a:has-text("Application Status")',
+      'a:has-text("Allocations")',
+      'a:has-text("Allocation")',
+      'a:has-text("Profile")',
+      'a:has-text("Disbursement")',
+      'a:has-text("Disbursements")',
+      'a:has-text("Statement")',
+      'a[href*="application" i]',
+      'a[href*="allocation" i]',
+      'a[href*="profile" i]',
+      'a[href*="disbursement" i]',
+      'a[href*="statement" i]'
+    ];
+
+    console.log("[playwright-scraper] Probing navigation sub-routes and tabs for deep data interception…");
+    for (const tabSelector of tabsToVisit) {
+      try {
+        const tab = page.locator(tabSelector).first();
+        if (await tab.isVisible({ timeout: 500 }).catch(() => false)) {
+          console.log(`[playwright-scraper] Visiting tab: ${tabSelector}`);
+          await tab.click().catch(() => {});
+          await page.waitForTimeout(2000); // Allow API response to trigger & DOM to render
+          const tabText = await page.locator("body").innerText().catch(async () => await page.evaluate(() => document.body.innerText).catch(() => ""));
+          if (tabText) accumulatedPageText += "\n" + tabText;
+        }
+      } catch (_) {}
     }
 
     // Check session cookies
@@ -770,10 +845,48 @@ async function playwrightHefLogin(email, password) {
     );
     const pageTitle = await page.title().catch(() => "");
 
-    // STRICT DOM SCRAPING: Scrape actual text nodes directly from portal HTML
-    const scrapedData = await scrapeDashboardFromPage(page);
+    // ── 3. DYNAMIC REGEX / FULL-TEXT FALLBACK & DOM SCRAPING ──
+    const apiData = hefEngine.extractDataFromCapturedJson(capturedProfileData, capturedResponses);
+    const domData = await scrapeDashboardFromPage(page);
+    const regexData = hefEngine.extractDataFromPageRegex(accumulatedPageText);
 
-    console.log("[playwright-login] ✅ Login and DOM scraping completed successfully.");
+    // ── 4. CONSTRUCT FINAL MERGED RESPONSE ──
+    const scrapedData = {
+      name: apiData.name || domData.name || regexData.name || null,
+      nationalId: apiData.nationalId || domData.nationalId || regexData.nationalId || (/^\d{5,10}$/.test(email) ? email : null) || null,
+      kcseIndex: apiData.kcseIndex || domData.kcseIndex || regexData.kcseIndex || null,
+      institution: apiData.institution || domData.institution || regexData.institution || null,
+      programme: apiData.programme || domData.programme || regexData.programme || null,
+      level: apiData.level || domData.level || regexData.level || null,
+      band: apiData.bandName || domData.band || regexData.bandName || (apiData.band ? `Band ${apiData.band}` : (regexData.band ? `Band ${regexData.band}` : null)),
+      bandNum: apiData.bandNum || domData.bandNum || regexData.bandNum || apiData.band || regexData.band || null,
+      outstandingDue: apiData.outstandingDue || domData.outstandingDue || regexData.outstandingDue || null,
+      loanAwarded: apiData.loanAwarded || domData.loanAwarded || regexData.loanAwarded || null,
+      scholarshipAmount: apiData.scholarshipAmount || domData.scholarshipAmount || regexData.scholarshipAmount || null,
+      tuitionLoan: apiData.tuitionLoan || domData.tuitionLoan || regexData.tuitionLoan || null,
+      upkeepLoan: apiData.upkeepLoan || domData.upkeepLoan || regexData.upkeepLoan || null,
+      householdFee: apiData.householdFee || domData.householdFee || regexData.householdFee || null,
+      totalRepaid: apiData.totalRepaid !== undefined ? apiData.totalRepaid : (domData.totalRepaid !== undefined ? domData.totalRepaid : (regexData.totalRepaid !== undefined ? regexData.totalRepaid : 0)),
+      yearOfStudy: apiData.yearOfStudy || domData.yearOfStudy || regexData.yearOfStudy || null,
+      currentSemester: apiData.currentSemester || domData.currentSemester || regexData.currentSemester || null,
+      academicYear: apiData.academicYear || domData.academicYear || regexData.academicYear || null,
+      bankName: apiData.bankName || domData.bankName || regexData.bankName || null,
+      accountNumber: apiData.accountNumber || domData.accountNumber || regexData.accountNumber || null,
+      applicationStatus: apiData.applicationStatus || domData.applicationStatus || regexData.applicationStatus || null,
+      applicationRef: apiData.applicationRef || domData.applicationRef || regexData.applicationRef || null,
+      disbursements: (apiData.disbursements && apiData.disbursements.length > 0) ? apiData.disbursements : (domData.disbursements && domData.disbursements.length > 0 ? domData.disbursements : []),
+      capturedApiData: apiData
+    };
+
+    console.log("[playwright-login] ✅ Deep scraping completed. Final verified attributes:", JSON.stringify({
+      name: scrapedData.name || "Data not found",
+      nationalId: scrapedData.nationalId || "Data not found",
+      institution: scrapedData.institution || "Data not found",
+      band: scrapedData.band || "Data not found",
+      kcseIndex: scrapedData.kcseIndex || "Data not found",
+      outstandingDue: scrapedData.outstandingDue || "Data not found"
+    }));
+
     return {
       ok: true,
       success: true,

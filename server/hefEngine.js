@@ -391,11 +391,383 @@ function extractUserDetailsFromText(text = "") {
   return extracted;
 }
 
+/**
+ * Recursively search for any matching target key in nested objects or arrays
+ */
+function findValueInObject(obj, targetKeys) {
+  if (!obj || typeof obj !== "object") return null;
+
+  // 1. Check direct keys first
+  for (const key of Object.keys(obj)) {
+    const cleanKey = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+    for (const target of targetKeys) {
+      const cleanTarget = target.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (cleanKey === cleanTarget && obj[key] !== null && obj[key] !== undefined && obj[key] !== "") {
+        return obj[key];
+      }
+    }
+  }
+
+  // 2. Search sub-objects recursively
+  for (const key of Object.keys(obj)) {
+    if (typeof obj[key] === "object" && obj[key] !== null && !Array.isArray(obj[key])) {
+      const nested = findValueInObject(obj[key], targetKeys);
+      if (nested !== null && nested !== undefined && nested !== "") {
+        return nested;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Recursively find disbursement or allocation arrays in captured objects
+ */
+function findDisbursementsInObject(obj) {
+  if (!obj || typeof obj !== "object") return [];
+  if (Array.isArray(obj)) {
+    if (obj.length > 0 && typeof obj[0] === "object" && obj[0] !== null) {
+      const first = obj[0];
+      const hasDisbKeys = Object.keys(first).some(k => /amount|disburs|sem|purpose|batch|date|status|tuition|upkeep/i.test(k));
+      if (hasDisbKeys) {
+        return obj.map(item => ({
+          date: item.date || item.disbursement_date || item.created_at || item.release_date || null,
+          semester: item.semester || item.sem || item.academic_year || null,
+          purpose: item.purpose || item.type || item.loan_type || item.description || "Tuition / Upkeep",
+          amount: item.amount || item.disbursed_amount || item.awarded_amount || null,
+          status: item.status || "Disbursed",
+          batch: item.batch || item.batch_no || item.batch_number || null
+        }));
+      }
+    }
+  }
+
+  for (const key of Object.keys(obj)) {
+    if (/disburs|allocat|schedule|loans|ledger/i.test(key) && Array.isArray(obj[key])) {
+      const list = findDisbursementsInObject(obj[key]);
+      if (list.length > 0) return list;
+    }
+    if (typeof obj[key] === "object" && obj[key] !== null) {
+      const nested = findDisbursementsInObject(obj[key]);
+      if (nested.length > 0) return nested;
+    }
+  }
+
+  return [];
+}
+
+/**
+ * Extract structured HEF student/loan data from captured JSON payloads
+ */
+function extractDataFromCapturedJson(capturedProfileData = {}, capturedResponses = []) {
+  const allPayloads = [capturedProfileData, ...capturedResponses.map(r => r.data || r)];
+  const extracted = {};
+
+  for (const payload of allPayloads) {
+    if (!payload || typeof payload !== "object") continue;
+
+    // Student Name
+    if (!extracted.name) {
+      const val = findValueInObject(payload, [
+        "name", "fullName", "full_name", "student_name", "studentName", "applicant_name",
+        "applicantName", "loanee_name", "user_name", "userName"
+      ]);
+      if (val && typeof val === "string" && val.trim().length > 1 && !/dashboard|sign out|logout|profile|null|undefined/i.test(val)) {
+        extracted.name = val.trim();
+      }
+    }
+
+    // National ID
+    if (!extracted.nationalId) {
+      const val = findValueInObject(payload, [
+        "nationalId", "national_id", "national_id_no", "id_no", "idNo", "id_number",
+        "idNumber", "identity_no", "idnumber", "id"
+      ]);
+      if (val && (typeof val === "string" || typeof val === "number")) {
+        const idStr = String(val).replace(/[^0-9]/g, "");
+        if (idStr.length >= 5 && idStr.length <= 10) {
+          extracted.nationalId = idStr;
+        }
+      }
+    }
+
+    // KCSE Index
+    if (!extracted.kcseIndex) {
+      const val = findValueInObject(payload, [
+        "kcseIndex", "kcse_index", "kcse_no", "kcseNo", "index_number", "indexNumber",
+        "index_no", "indexNo", "kcse", "indexNumberYear"
+      ]);
+      if (val && typeof val === "string") {
+        const kMatch = val.match(/\b\d{11}(?:\/\d{4})?\b/);
+        if (kMatch) extracted.kcseIndex = kMatch[0];
+        else if (val.trim().length >= 8) extracted.kcseIndex = val.trim();
+      }
+    }
+
+    // Institution / University
+    if (!extracted.institution) {
+      const val = findValueInObject(payload, [
+        "institution", "institution_name", "institutionName", "university", "university_name",
+        "college", "college_name", "school", "school_name", "inst_name"
+      ]);
+      if (val && typeof val === "string" && val.trim().length > 2 && val !== "Data not found") {
+        extracted.institution = val.trim();
+      }
+    }
+
+    // Programme / Course
+    if (!extracted.programme) {
+      const val = findValueInObject(payload, [
+        "programme", "programme_name", "programmeName", "program", "program_name",
+        "programName", "course", "course_name", "courseName", "degree", "degree_name"
+      ]);
+      if (val && typeof val === "string" && val.trim().length > 2 && val !== "Data not found") {
+        extracted.programme = val.trim();
+      }
+    }
+
+    // Band
+    if (extracted.band === undefined) {
+      const val = findValueInObject(payload, [
+        "band", "allocated_band", "allocatedBand", "funding_band", "fundingBand",
+        "band_allocated", "band_name", "bandName", "band_num", "bandNum", "current_band", "band_code"
+      ]);
+      if (val !== null && val !== undefined) {
+        const bParsed = parseInt(String(val).replace(/[^0-9]/g, ""), 10);
+        if (!isNaN(bParsed) && bParsed >= 1 && bParsed <= 5) {
+          extracted.band = bParsed;
+          extracted.bandNum = bParsed;
+          extracted.bandName = `Band ${bParsed}`;
+        }
+      }
+    }
+
+    // Outstanding Due / Loan Balance
+    if (!extracted.outstandingDue) {
+      const val = findValueInObject(payload, [
+        "outstandingDue", "outstanding_due", "outstandingBalance", "outstanding_balance",
+        "loan_balance", "loanBalance", "total_due", "totalDue", "total_outstanding",
+        "totalOutstanding", "balance", "current_balance", "out_balance"
+      ]);
+      if (val !== null && val !== undefined && val !== "") {
+        extracted.outstandingDue = typeof val === "number" ? `KES ${val.toLocaleString()}` : String(val).trim();
+      }
+    }
+
+    // Loan Awarded
+    if (!extracted.loanAwarded) {
+      const val = findValueInObject(payload, [
+        "loanAwarded", "loan_awarded", "awardedPrincipal", "awarded_principal",
+        "total_loan", "totalLoan", "allocated_loan", "allocatedLoan", "loan_amount", "loanAmount"
+      ]);
+      if (val !== null && val !== undefined && val !== "") {
+        extracted.loanAwarded = val;
+      }
+    }
+
+    // Scholarship Amount
+    if (!extracted.scholarshipAmount) {
+      const val = findValueInObject(payload, [
+        "scholarshipAmount", "scholarship_amount", "total_scholarship", "totalScholarship",
+        "scholarship", "allocated_scholarship", "scholarship_awarded"
+      ]);
+      if (val !== null && val !== undefined && val !== "") {
+        extracted.scholarshipAmount = val;
+      }
+    }
+
+    // Tuition Loan & Upkeep Loan & Household Fee
+    if (!extracted.tuitionLoan) {
+      const val = findValueInObject(payload, ["tuitionLoan", "tuition_loan", "allocated_tuition", "tuition"]);
+      if (val !== null && val !== undefined && val !== "") extracted.tuitionLoan = val;
+    }
+    if (!extracted.upkeepLoan) {
+      const val = findValueInObject(payload, ["upkeepLoan", "upkeep_loan", "living_allowance", "allocated_upkeep", "upkeep"]);
+      if (val !== null && val !== undefined && val !== "") extracted.upkeepLoan = val;
+    }
+    if (!extracted.householdFee) {
+      const val = findValueInObject(payload, ["householdFee", "household_fee", "household_contribution", "householdContribution", "family_contribution"]);
+      if (val !== null && val !== undefined && val !== "") extracted.householdFee = val;
+    }
+
+    // Total Repaid
+    if (extracted.totalRepaid === undefined) {
+      const val = findValueInObject(payload, ["totalRepaid", "total_repaid", "repaid", "amount_repaid", "total_payment", "paid"]);
+      if (val !== null && val !== undefined && val !== "") extracted.totalRepaid = val;
+    }
+
+    // Year of Study & Current Semester
+    if (!extracted.yearOfStudy) {
+      const val = findValueInObject(payload, ["yearOfStudy", "year_of_study", "study_year", "year", "current_year"]);
+      if (val) {
+        const parsedY = parseInt(String(val).replace(/[^0-9]/g, ""), 10);
+        if (!isNaN(parsedY) && parsedY >= 1 && parsedY <= 6) extracted.yearOfStudy = parsedY;
+      }
+    }
+    if (!extracted.currentSemester) {
+      const val = findValueInObject(payload, ["currentSemester", "current_semester", "semester", "study_semester", "sem"]);
+      if (val) {
+        const parsedS = parseInt(String(val).replace(/[^0-9]/g, ""), 10);
+        if (!isNaN(parsedS) && parsedS >= 1 && parsedS <= 3) extracted.currentSemester = parsedS;
+      }
+    }
+
+    // Academic Year
+    if (!extracted.academicYear) {
+      const val = findValueInObject(payload, ["academicYear", "academic_year", "financial_year", "fin_year", "year_name"]);
+      if (val && typeof val === "string" && val.trim().length > 3) extracted.academicYear = val.trim();
+    }
+
+    // Bank Details
+    if (!extracted.bankName) {
+      const val = findValueInObject(payload, ["bankName", "bank_name", "bank", "disbursement_bank", "upkeep_bank"]);
+      if (val && typeof val === "string" && val.trim().length > 1) extracted.bankName = val.trim();
+    }
+    if (!extracted.accountNumber) {
+      const val = findValueInObject(payload, ["accountNumber", "account_number", "account_no", "accountNo", "bank_account", "bank_account_no", "acc_no"]);
+      if (val && (typeof val === "string" || typeof val === "number") && String(val).trim().length > 3) {
+        extracted.accountNumber = String(val).trim();
+      }
+    }
+
+    // Application Status & Ref
+    if (!extracted.applicationStatus) {
+      const val = findValueInObject(payload, ["applicationStatus", "application_status", "app_status", "appStatus", "status", "stage"]);
+      if (val && typeof val === "string" && val.trim().length > 1) extracted.applicationStatus = val.trim();
+    }
+    if (!extracted.applicationRef) {
+      const val = findValueInObject(payload, ["applicationRef", "application_ref", "app_ref", "appRef", "batch_no", "batch_number", "batchNo", "application_number", "reference_no", "batch"]);
+      if (val && typeof val === "string" && val.trim().length > 1) extracted.applicationRef = val.trim();
+    }
+
+    // Disbursements Array
+    const disbs = findDisbursementsInObject(payload);
+    if (disbs.length > 0 && (!extracted.disbursements || extracted.disbursements.length === 0)) {
+      extracted.disbursements = disbs;
+    }
+  }
+
+  return extracted;
+}
+
+/**
+ * Dynamic Regex / Full-Text Fallback extraction from page innerText
+ */
+function extractDataFromPageRegex(text = "") {
+  if (!text || typeof text !== "string") return {};
+  const extracted = {};
+
+  // 1. KCSE Index: /\b\d{11}(?:\/\d{4})?\b/
+  const kcseLabeled = text.match(/(?:kcse(?:\s*index|\s*no\.?)?|index\s*no\.?|index\s*number)\s*[:#-]?\s*(\d{11}(?:\/\d{4})?)/i);
+  const kcseDirect = text.match(/\b(\d{11}(?:\/\d{4})?)\b/);
+  if (kcseLabeled && kcseLabeled[1]) {
+    extracted.kcseIndex = kcseLabeled[1].trim();
+  } else if (kcseDirect && kcseDirect[1]) {
+    extracted.kcseIndex = kcseDirect[1].trim();
+  }
+
+  // 2. Band: /\bBand\s*([1-5])\b/i
+  const bandLabeled = text.match(/(?:allocated\s*band|funding\s*band|assigned\s*band|current\s*band|band\s*allocated)\s*[:#-]?\s*Band\s*([1-5])\b/i);
+  const bandDirect = text.match(/\bBand\s*([1-5])\b/i);
+  if (bandLabeled && bandLabeled[1]) {
+    extracted.band = parseInt(bandLabeled[1], 10);
+    extracted.bandNum = parseInt(bandLabeled[1], 10);
+    extracted.bandName = `Band ${bandLabeled[1]}`;
+  } else if (bandDirect && bandDirect[1]) {
+    extracted.band = parseInt(bandDirect[1], 10);
+    extracted.bandNum = parseInt(bandDirect[1], 10);
+    extracted.bandName = `Band ${bandDirect[1]}`;
+  }
+
+  // 3. National ID: /\b\d{8}\b/
+  const idLabeled = text.match(/(?:national\s*id(?:\s*no\.?)?|id\s*number|id\s*no\.?|id\/passport)\s*[:#-]?\s*(\d{6,10})\b/i);
+  const idDirect = text.match(/\b(\d{8})\b/);
+  if (idLabeled && idLabeled[1]) {
+    extracted.nationalId = idLabeled[1].trim();
+  } else if (idDirect && idDirect[1]) {
+    extracted.nationalId = idDirect[1].trim();
+  }
+
+  // 4. Currency/Outstanding Due: /KES\s*[\d,]+(?:\.\d{2})?/i
+  const outLabeled = text.match(/(?:total\s*outstanding|outstanding\s*due|loan\s*balance|outstanding\s*balance|total\s*due|loan\s*due|total\s*loan\s*due)\s*[:#-]?\s*(KES\s*[\d,]+(?:\.\d{2})?|[\d,]+(?:\.\d{2})?)/i);
+  const outDirect = text.match(/\b(KES\s*[\d,]+(?:\.\d{2})?)\b/i);
+  if (outLabeled && outLabeled[1]) {
+    const val = outLabeled[1].trim();
+    extracted.outstandingDue = val.toUpperCase().startsWith("KES") ? val : `KES ${val}`;
+  } else if (outDirect && outDirect[1]) {
+    extracted.outstandingDue = outDirect[1].trim();
+  }
+
+  // 5. Institution extraction
+  for (const inst of INSTITUTIONS) {
+    if (text.toLowerCase().includes(inst.name.toLowerCase()) || text.toLowerCase().includes(inst.code.toLowerCase())) {
+      extracted.institution = inst.name;
+      if (inst.level) extracted.level = inst.level;
+      break;
+    }
+  }
+
+  // 6. Programme extraction
+  for (const [key, prog] of Object.entries(PROGRAMMES)) {
+    if (text.toLowerCase().includes(key) || text.toLowerCase().includes(prog.name.toLowerCase())) {
+      extracted.programme = prog.name;
+      extracted.level = prog.level;
+      break;
+    }
+  }
+
+  // 7. Academic Year
+  const yearMatch = text.match(/\b(202[0-9]\s*[\/-]\s*202[0-9])\b/);
+  if (yearMatch && yearMatch[1]) {
+    extracted.academicYear = yearMatch[1].replace(/\s+/g, "");
+  }
+
+  // 8. Year of study
+  const studyYearMatch = text.match(/\b(?:year\s*([1-6])|([1-6])(?:st|nd|rd|th)\s*year)\b/i);
+  if (studyYearMatch) {
+    extracted.yearOfStudy = parseInt(studyYearMatch[1] || studyYearMatch[2], 10);
+  }
+
+  // 9. Semester
+  const semMatch = text.match(/\b(?:semester\s*([1-3])|sem\s*([1-3]))\b/i);
+  if (semMatch) {
+    extracted.currentSemester = parseInt(semMatch[1] || semMatch[2], 10);
+  }
+
+  // 10. Bank Name & Account Number
+  const bankMatch = text.match(/(?:Bank\s*Name|Bank|Upkeep\s*Bank)\s*[:#-]?\s*([A-Za-z\s]+(?:Bank|M-Pesa|SACCO|Microfinance))/i);
+  if (bankMatch && bankMatch[1]) {
+    extracted.bankName = bankMatch[1].trim();
+  }
+  const accMatch = text.match(/(?:Account\s*Number|Account\s*No\.?|A\/C\s*No\.?)\s*[:#-]?\s*(\d{6,16})/i);
+  if (accMatch && accMatch[1]) {
+    extracted.accountNumber = accMatch[1].trim();
+  }
+
+  // 11. Application Status & Ref
+  const appStatusMatch = text.match(/(?:Application\s*Status|Funding\s*Status|Status)\s*[:#-]?\s*([A-Za-z\s]{3,30})/i);
+  if (appStatusMatch && appStatusMatch[1] && !/dashboard|menu|profile/i.test(appStatusMatch[1])) {
+    extracted.applicationStatus = appStatusMatch[1].trim();
+  }
+  const appRefMatch = text.match(/(?:Application\s*Ref|Ref\s*No\.?|Batch\s*No\.?)\s*[:#-]?\s*([A-Z0-9\/-]+)/i) ||
+                      text.match(/\b(HEF-[A-Z0-9-]+|HELB-[A-Z0-9-]+)\b/i);
+  if (appRefMatch && appRefMatch[1]) {
+    extracted.applicationRef = appRefMatch[1].trim();
+  }
+
+  return extracted;
+}
+
 module.exports = {
   INSTITUTIONS,
   PROGRAMMES,
   HEF_BANDS,
   resolveHefProfile,
   isHelbDomainQuery,
-  extractUserDetailsFromText
+  extractUserDetailsFromText,
+  findValueInObject,
+  findDisbursementsInObject,
+  extractDataFromCapturedJson,
+  extractDataFromPageRegex
 };
