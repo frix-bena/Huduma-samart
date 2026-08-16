@@ -8,85 +8,31 @@
 let GEN = 0;
 const STORAGE_KEY = "huduma_smart_student_session_v2";
 
-// Reactive Student & Portal Session State
+// Reactive Student & Portal Session State (Strictly bound to authentic HEF portal data)
 const S = {
   auth: false,
   sessionToken: null,
-  // Student Profile details (synchronized with HEF portal)
+  // Student Profile details (synchronized with HEF portal DOM)
   nationalId: "",
   name: "",
   email: "",
   phone: "",
   kcseIndex: "",
-  institution: "University of Nairobi (UoN)",
-  programme: "Bachelor of Science in Computer Science",
+  institution: "",
+  programme: "",
   level: "Undergraduate",
-  yearOfStudy: 2,
-  currentSemester: 1,
-  band: 2,
-  academicYear: "2024/2025",
-  bankName: "Equity Bank Kenya",
-  accountNumber: "0112938472901",
+  yearOfStudy: null,
+  currentSemester: null,
+  band: null,
+  bandName: "",
+  academicYear: "",
+  bankName: "",
+  accountNumber: "",
   repaid: 0,
-  penalty: 0
-};
-
-// ── Preset Demo Accounts for Quick Testing on HEF Portal ──
-const HEF_PRESETS = {
-  "38492018": {
-    nationalId: "38492018",
-    name: "Brian Kiprop Cheruiyot",
-    email: "brian.cheruiyot@students.ku.ac.ke",
-    phone: "+254 712 345 678",
-    kcseIndex: "12345678001/2022",
-    institution: "Kenyatta University (KU)",
-    programme: "Bachelor of Science in Computer Science",
-    level: "Undergraduate",
-    yearOfStudy: 2,
-    currentSemester: 1,
-    band: 2,
-    academicYear: "2024/2025",
-    bankName: "Equity Bank Kenya",
-    accountNumber: "0112938472901",
-    repaid: 0,
-    penalty: 0
-  },
-  "39102948": {
-    nationalId: "39102948",
-    name: "Faith Wanjiku Mwangi",
-    email: "faith.wanjiku@students.uonbi.ac.ke",
-    phone: "+254 722 987 654",
-    kcseIndex: "11200001004/2021",
-    institution: "University of Nairobi (UoN)",
-    programme: "Bachelor of Medicine and Bachelor of Surgery (MBChB)",
-    level: "Undergraduate",
-    yearOfStudy: 3,
-    currentSemester: 1,
-    band: 1,
-    academicYear: "2024/2025",
-    bankName: "KCB Bank Kenya",
-    accountNumber: "1289401928",
-    repaid: 0,
-    penalty: 0
-  },
-  "36829104": {
-    nationalId: "36829104",
-    name: "Kevin Otieno Omondi",
-    email: "kevin.otieno@students.jkuat.ac.ke",
-    phone: "+254 733 456 789",
-    kcseIndex: "20400002019/2020",
-    institution: "Jomo Kenyatta University of Agriculture and Technology (JKUAT)",
-    programme: "Bachelor of Science in Electrical & Electronic Engineering",
-    level: "Undergraduate",
-    yearOfStudy: 4,
-    currentSemester: 1,
-    band: 3,
-    academicYear: "2024/2025",
-    bankName: "Co-operative Bank of Kenya",
-    accountNumber: "01192847192",
-    repaid: 15000,
-    penalty: 0
-  }
+  penalty: 0,
+  outstandingBalance: null,
+  loanAwarded: null,
+  disbursements: []
 };
 
 // ── Kenyan HEF Funding Matrix Reference ──
@@ -209,10 +155,6 @@ function cleanNameFromEmail(email) {
  */
 function resolveClientProfile(input = {}) {
   const cleanId = (input.nationalId || input.credential || input.email || "").trim();
-  
-  if (HEF_PRESETS[cleanId] && !input.name && !input.fullName) {
-    return { ...HEF_PRESETS[cleanId], ...input };
-  }
 
   // Resolve Real Name
   let name = (input.name || input.fullName || input.studentName || "").trim();
@@ -224,46 +166,61 @@ function resolveClientProfile(input = {}) {
     }
   }
   if (!name) {
-    name = cleanId && /^\d{5,10}$/.test(cleanId) ? `HEF Student (${cleanId})` : "Authenticated Student";
+    name = cleanId && /^\d{5,10}$/.test(cleanId) ? `HEF Student (${cleanId})` : "Data not found";
   }
 
-  const nationalId = cleanId && /^\d{5,10}$/.test(cleanId) ? cleanId : (input.nationalId || S.nationalId || "38492018");
-  const email = input.email || (input.credential && input.credential.includes("@") ? input.credential : `${name.toLowerCase().replace(/[^a-z0-9]/g, ".") || "student"}@students.ac.ke`);
-  const kcseIndex = input.kcseIndex || S.kcseIndex || `${nationalId}01/2022`;
-  const institution = input.institution || S.institution || "University of Nairobi (UoN)";
-  const programme = input.programme || S.programme || "Bachelor of Science in Computer Science";
-  const band = parseInt(input.band, 10) || S.band || 2;
-  const yearOfStudy = parseInt(input.yearOfStudy, 10) || S.yearOfStudy || 2;
-  const currentSemester = parseInt(input.currentSemester, 10) || S.currentSemester || 1;
-  const bankName = input.bankName || S.bankName || "Equity Bank Kenya";
-  const accountNumber = input.accountNumber || S.accountNumber || `011${nationalId.padEnd(10, '0').slice(0, 10)}`;
+  const nationalId = cleanId && /^\d{5,10}$/.test(cleanId) ? cleanId : (input.nationalId || S.nationalId || "Data not found");
+  const email = input.email || (input.credential && input.credential.includes("@") ? input.credential : null);
+  const kcseIndex = input.kcseIndex || S.kcseIndex || "Data not found";
+  const institution = input.institution || S.institution || "Data not found";
+  const programme = input.programme || S.programme || "Data not found";
+  const band = input.band ? (parseInt(input.band.toString().replace(/[^0-9]/g, ""), 10) || null) : (S.band || null);
+  const yearOfStudy = input.yearOfStudy ? parseInt(input.yearOfStudy, 10) : (S.yearOfStudy || null);
+  const currentSemester = input.currentSemester ? parseInt(input.currentSemester, 10) : (S.currentSemester || null);
+  const bankName = input.bankName || S.bankName || "Data not found";
+  const accountNumber = input.accountNumber || S.accountNumber || "Data not found";
 
   return {
     nationalId,
     name,
     email,
-    phone: input.phone || S.phone || `+254 7${nationalId.slice(-8).padStart(8, '1')}`,
+    phone: input.phone || S.phone || null,
     kcseIndex,
     institution,
     programme,
-    level: "Undergraduate",
+    level: input.level || S.level || (programme !== "Data not found" && programme.toLowerCase().includes("diploma") ? "TVET" : "Undergraduate"),
     yearOfStudy,
     currentSemester,
     band,
-    academicYear: "2024/2025",
+    bandName: band ? `Band ${band}` : (S.bandName || "Data not found"),
+    academicYear: input.academicYear || S.academicYear || "Data not found",
     bankName,
     accountNumber,
     repaid: input.repaid !== undefined ? input.repaid : (S.repaid || 0),
-    penalty: input.penalty !== undefined ? input.penalty : (S.penalty || 0)
+    penalty: input.penalty !== undefined ? input.penalty : (S.penalty || 0),
+    outstandingBalance: input.outstandingDue !== undefined ? input.outstandingDue : (S.outstandingBalance || null)
   };
 }
 
 // ── Realistic Calculation Helper ──
 function calculateCurrentProfile() {
-  const band = HEF_BANDS[S.band] || HEF_BANDS[2];
-  
+  const bandNum = S.band && HEF_BANDS[S.band] ? S.band : null;
+  const band = bandNum ? HEF_BANDS[bandNum] : {
+    band: null,
+    name: S.bandName || (S.band ? `Band ${S.band}` : "Data not found"),
+    category: "Data not found",
+    householdIncome: "Data not found",
+    scholarshipPct: 0,
+    loanPct: 0,
+    householdPct: 0,
+    upkeepAnnual: 0,
+    upkeepPerSem: 0,
+    color: "#3b82f6",
+    desc: "Awaiting HEF portal band classification data."
+  };
+
   // Determine Program Cost
-  let cost = 216000;
+  let cost = 0;
   const lowerProg = (S.programme || "").toLowerCase();
   for (const [key, val] of Object.entries(PROGRAMME_COSTS)) {
     if (lowerProg.includes(key)) {
@@ -272,11 +229,11 @@ function calculateCurrentProfile() {
     }
   }
 
-  const annualTuition = cost;
-  const annualScholarship = Math.round(annualTuition * (band.scholarshipPct / 100));
-  const annualTuitionLoan = Math.round(annualTuition * (band.loanPct / 100));
-  const annualHouseholdTuition = Math.round(annualTuition * (band.householdPct / 100));
-  const annualUpkeepLoan = band.upkeepAnnual;
+  const annualTuition = cost || 0;
+  const annualScholarship = band.scholarshipPct ? Math.round(annualTuition * (band.scholarshipPct / 100)) : 0;
+  const annualTuitionLoan = band.loanPct ? Math.round(annualTuition * (band.loanPct / 100)) : 0;
+  const annualHouseholdTuition = band.householdPct ? Math.round(annualTuition * (band.householdPct / 100)) : 0;
+  const annualUpkeepLoan = band.upkeepAnnual || 0;
   const annualTotalLoan = annualTuitionLoan + annualUpkeepLoan;
 
   const semTuitionLoan = Math.round(annualTuitionLoan / 2);
@@ -284,19 +241,28 @@ function calculateCurrentProfile() {
   const semHouseholdTuition = Math.round(annualHouseholdTuition / 2);
   const semUpkeepLoan = Math.round(annualUpkeepLoan / 2);
 
-  const completedSemesters = Math.max(0, (S.yearOfStudy - 1) * 2 + (S.currentSemester - 1));
-  const cumulativeAwardedPrincipal = Math.round(annualTotalLoan * S.yearOfStudy);
+  const yr = S.yearOfStudy || 1;
+  const curSem = S.currentSemester || 1;
+  const completedSemesters = Math.max(0, (yr - 1) * 2 + (curSem - 1));
+  const cumulativeAwardedPrincipal = S.loanAwarded !== null && S.loanAwarded !== undefined 
+    ? (typeof S.loanAwarded === "number" ? S.loanAwarded : (parseInt(S.loanAwarded.toString().replace(/[^0-9]/g, ""), 10) || 0))
+    : Math.round(annualTotalLoan * yr);
+
   const cumulativeDisbursedTuitionLoan = Math.round(semTuitionLoan * completedSemesters);
   const cumulativeDisbursedUpkeepLoan = Math.round(semUpkeepLoan * completedSemesters);
   const cumulativeDisbursedScholarship = Math.round(semScholarship * completedSemesters);
   const cumulativeDisbursedLoan = cumulativeDisbursedTuitionLoan + cumulativeDisbursedUpkeepLoan;
 
   const interestRate = 0.04; // 4% p.a.
-  const interestAccrued = Math.round(cumulativeDisbursedLoan * interestRate * Math.max(0.5, S.yearOfStudy - 1));
-  const outstandingBalance = Math.max(0, cumulativeDisbursedLoan + interestAccrued + (S.penalty || 0) - (S.repaid || 0));
+  const interestAccrued = Math.round(cumulativeDisbursedLoan * interestRate * Math.max(0.5, yr - 1));
+  const outstandingBalance = S.outstandingBalance !== null && S.outstandingBalance !== undefined
+    ? (typeof S.outstandingBalance === "number" ? S.outstandingBalance : (parseInt(S.outstandingBalance.toString().replace(/[^0-9]/g, ""), 10) || 0))
+    : Math.max(0, cumulativeDisbursedLoan + interestAccrued + (S.penalty || 0) - (S.repaid || 0));
 
   // Build disbursements
-  const disbursements = [];
+  const disbursements = Array.isArray(S.disbursements) && S.disbursements.length > 0
+    ? S.disbursements
+    : [];
   const startCalYear = 2024 - (S.yearOfStudy - 1);
 
   for (let yr = 1; yr <= S.yearOfStudy; yr++) {
@@ -783,22 +749,26 @@ async function performLogin(credential, password, fullName) {
       const p = res.profile;
       S.auth = true;
       S.sessionToken = res.sessionToken || `hef-sess-${Date.now().toString(36)}`;
-      S.nationalId = p.student.nationalId;
-      S.name = userFullNameState || p.student.name;
-      S.email = p.student.email;
-      S.phone = p.student.phone;
-      S.kcseIndex = p.student.kcseIndex;
-      S.institution = p.student.institution;
-      S.programme = p.student.programme;
+      S.nationalId = p.student.nationalId || "Data not found";
+      S.name = userFullNameState || p.student.name || "Authenticated Student";
+      S.email = p.student.email || "";
+      S.phone = p.student.phone || "";
+      S.kcseIndex = p.student.kcseIndex || "Data not found";
+      S.institution = p.student.institution || "Data not found";
+      S.programme = p.student.programme || "Data not found";
       S.level = p.student.level || "Undergraduate";
-      S.yearOfStudy = parseInt(p.student.yearOfStudy, 10) || 2;
-      S.currentSemester = parseInt(p.student.currentSemester, 10) || 1;
-      S.band = parseInt(p.funding?.band, 10) || 2;
-      S.academicYear = p.student.academicYear || "2024/2025";
-      S.bankName = p.student.bankName || "Equity Bank Kenya";
-      S.accountNumber = p.student.accountNumber || "0112938472901";
+      S.yearOfStudy = p.student.yearOfStudy ? parseInt(p.student.yearOfStudy, 10) : null;
+      S.currentSemester = p.student.currentSemester ? parseInt(p.student.currentSemester, 10) : null;
+      S.band = p.funding?.band || (p.funding?.bandName ? parseInt(p.funding.bandName.replace(/[^0-9]/g, ""), 10) : null);
+      S.bandName = p.funding?.bandName || (S.band ? `Band ${S.band}` : "Data not found");
+      S.academicYear = p.student.academicYear || "Data not found";
+      S.bankName = p.student.bankName || "Data not found";
+      S.accountNumber = p.student.accountNumber || "Data not found";
       S.repaid = p.funding?.cumulative?.repaid || 0;
       S.penalty = p.funding?.cumulative?.penalty || 0;
+      S.outstandingBalance = p.funding?.cumulative?.outstandingBalance !== undefined ? p.funding.cumulative.outstandingBalance : null;
+      S.loanAwarded = p.funding?.cumulative?.awardedPrincipal !== undefined ? p.funding.cumulative.awardedPrincipal : null;
+      S.disbursements = Array.isArray(p.disbursements) ? p.disbursements : [];
     } else {
       // Synchronized authentic fallback
       const resolved = resolveClientProfile({
@@ -814,8 +784,12 @@ async function performLogin(credential, password, fullName) {
 
     updateSessionUI();
 
-    const bandInfo = HEF_BANDS[S.band] || HEF_BANDS[2];
+    const bandInfo = (S.band && HEF_BANDS[S.band]) ? HEF_BANDS[S.band] : { category: S.bandName || "Data not found" };
     const calc = calculateCurrentProfile();
+
+    const outstandingDisplay = S.outstandingBalance !== null && S.outstandingBalance !== undefined
+      ? (typeof S.outstandingBalance === "number" ? `KES ${S.outstandingBalance.toLocaleString()}` : S.outstandingBalance)
+      : (calc.outstandingBalance ? `KES ${calc.outstandingBalance.toLocaleString()}` : "Data not found");
 
     const welcomeHtml = `
       <div class="rc ok">
@@ -829,11 +803,11 @@ async function performLogin(credential, password, fullName) {
             <li><strong>Student Name:</strong> <strong>${S.name}</strong></li>
             <li><strong>National ID:</strong> <code style="font-family:'JetBrains Mono',monospace;color:var(--blue);">${S.nationalId}</code></li>
             <li><strong>Institution:</strong> <strong>${S.institution}</strong></li>
-            <li><strong>Programme:</strong> <strong>${S.programme}</strong> (${S.level}, Year ${S.yearOfStudy})</li>
-            <li><strong>Allocated Band:</strong> <strong style="color:var(--yellow);">Band ${S.band} (${bandInfo.category})</strong></li>
+            <li><strong>Programme:</strong> <strong>${S.programme}</strong> ${S.yearOfStudy ? `(${S.level}, Year ${S.yearOfStudy})` : `(${S.level})`}</li>
+            <li><strong>Allocated Band:</strong> <strong style="color:var(--yellow);">${S.band ? `Band ${S.band} (${bandInfo.category})` : (S.bandName || 'Data not found')}</strong></li>
             <li><strong>KCSE Index:</strong> <code>${S.kcseIndex}</code></li>
             <li><strong>Disbursement Account:</strong> ${S.bankName} (<code>${S.accountNumber}</code>)</li>
-            <li><strong>Total Outstanding Due:</strong> <strong style="color:var(--green);">KES ${calc.outstandingBalance.toLocaleString()}</strong></li>
+            <li><strong>Total Outstanding Due:</strong> <strong style="color:var(--green);">${outstandingDisplay}</strong></li>
           </ul>
         </div>
         <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;">
@@ -859,7 +833,7 @@ async function performLogin(credential, password, fullName) {
     S.sessionToken = `hef-sess-${Date.now().toString(36)}`;
     Object.assign(S, resolved);
     updateSessionUI();
-    addMsg("agent", `✅ <strong>HEF Portal Session Connected</strong> for <strong>${S.name}</strong> (National ID: <strong>${S.nationalId}</strong>, ${S.institution}, Band ${S.band}). Your verified details are active.`);
+    addMsg("agent", `✅ <strong>HEF Portal Session Connected</strong> for <strong>${S.name}</strong> (National ID: <strong>${S.nationalId}</strong>, ${S.institution}, ${S.band ? `Band ${S.band}` : (S.bandName || 'Data not found')}). Your verified details are active.`);
   }
 }
 
@@ -872,15 +846,19 @@ function logout() {
   S.email = "";
   S.phone = "";
   S.kcseIndex = "";
-  S.institution = "University of Nairobi (UoN)";
-  S.programme = "Bachelor of Science in Computer Science";
-  S.band = 2;
-  S.yearOfStudy = 2;
-  S.currentSemester = 1;
-  S.bankName = "Equity Bank Kenya";
-  S.accountNumber = "0112938472901";
+  S.institution = "";
+  S.programme = "";
+  S.band = null;
+  S.bandName = "";
+  S.yearOfStudy = null;
+  S.currentSemester = null;
+  S.bankName = "";
+  S.accountNumber = "";
   S.repaid = 0;
   S.penalty = 0;
+  S.outstandingBalance = null;
+  S.loanAwarded = null;
+  S.disbursements = [];
   userFullNameState = "";
   userEmailState = "";
   userPasswordState = "";
@@ -916,20 +894,6 @@ function renderAuthGateCard() {
           <div class="password-input-wrap">
             <input type="password" id="inlineLoginPass" placeholder="Enter your portal password" value="${userPasswordState || ''}" oninput="handlePasswordChange(this.value)" required style="width:100%;padding:9px 12px;background:var(--bg4);border:1px solid var(--border2);border-radius:8px;color:var(--t1);font-size:13px;outline:none;">
             <button type="button" class="pwd-toggle-btn" onclick="togglePasswordVisibility('inlineLoginPass', this)" title="Show/Hide">👁️</button>
-          </div>
-        </div>
-        <div class="preset-section">
-          <div class="preset-label">⚡ Demo Accounts (Click to Auto-Fill):</div>
-          <div class="preset-chips">
-            <button type="button" class="preset-chip" onclick="fillInlineLogin('38492018', 'Student@2024', 'Brian Kiprop Cheruiyot')">
-              <strong>Brian Kiprop</strong> (ID: 38492018 · Band 2)
-            </button>
-            <button type="button" class="preset-chip" onclick="fillInlineLogin('39102948', 'Student@2024', 'Faith Wanjiku Mwangi')">
-              <strong>Faith Wanjiku</strong> (ID: 39102948 · Band 1)
-            </button>
-            <button type="button" class="preset-chip" onclick="fillInlineLogin('36829104', 'Student@2024', 'Kevin Otieno Omondi')">
-              <strong>Kevin Otieno</strong> (ID: 36829104 · Band 3)
-            </button>
           </div>
         </div>
         <button type="submit" class="auth-btn" style="width:100%;margin-top:12px;padding:11px;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
@@ -1089,18 +1053,19 @@ function printStatement() {
 
 // ── Rich Card Renderers (Strictly bound to verified student details) ──
 function cardProfileOverview(p) {
+  const bandLabel = S.band ? `Band ${S.band} (${p.band.category})` : (S.bandName || "Data not found");
   return `
     <div class="rc info">
       <div class="rc-lbl">👤 Verified Student Profile — portal.hef.co.ke</div>
       <div style="font-size:13px;line-height:1.65;margin:4px 0 8px;">
         <ul style="margin:4px 0 6px 18px;">
-          <li><strong>Student Name:</strong> <strong>${S.name}</strong></li>
-          <li><strong>National ID:</strong> <code>${S.nationalId}</code></li>
-          <li><strong>KCSE Index:</strong> <code>${S.kcseIndex}</code></li>
-          <li><strong>Institution:</strong> <strong>${S.institution}</strong></li>
-          <li><strong>Programme:</strong> <strong>${S.programme}</strong> (${S.level}, Year ${S.yearOfStudy})</li>
-          <li><strong>Allocated Band:</strong> <strong style="color:var(--yellow);">Band ${S.band} (${p.band.category})</strong></li>
-          <li><strong>Upkeep Channel:</strong> ${S.bankName} (<code>${S.accountNumber}</code>)</li>
+          <li><strong>Student Name:</strong> <strong>${S.name || "Data not found"}</strong></li>
+          <li><strong>National ID:</strong> <code>${S.nationalId || "Data not found"}</code></li>
+          <li><strong>KCSE Index:</strong> <code>${S.kcseIndex || "Data not found"}</code></li>
+          <li><strong>Institution:</strong> <strong>${S.institution || "Data not found"}</strong></li>
+          <li><strong>Programme:</strong> <strong>${S.programme || "Data not found"}</strong> ${S.yearOfStudy ? `(${S.level}, Year ${S.yearOfStudy})` : `(${S.level})`}</li>
+          <li><strong>Allocated Band:</strong> <strong style="color:var(--yellow);">${bandLabel}</strong></li>
+          <li><strong>Upkeep Channel:</strong> ${S.bankName || "Data not found"} (<code>${S.accountNumber || "Data not found"}</code>)</li>
         </ul>
       </div>
       <div style="display:flex;gap:8px;margin-top:8px;">
@@ -1111,19 +1076,32 @@ function cardProfileOverview(p) {
 }
 
 function cardBalance(p) {
+  const bandLabel = S.band ? `Band ${S.band} (${p.band.category})` : (S.bandName || "Data not found");
+  const balDisplay = typeof p.outstandingBalance === "number" 
+    ? `KES ${p.outstandingBalance.toLocaleString()}` 
+    : (p.outstandingBalance || "Data not found");
+
+  const awardedDisplay = typeof p.cumulativeAwardedPrincipal === "number"
+    ? `KES ${p.cumulativeAwardedPrincipal.toLocaleString()}`
+    : (p.cumulativeAwardedPrincipal || "Data not found");
+
+  const disbursedDisplay = typeof p.cumulativeDisbursedLoan === "number"
+    ? `KES ${p.cumulativeDisbursedLoan.toLocaleString()}`
+    : (p.cumulativeDisbursedLoan || "Data not found");
+
   return `
     <div class="rc ok">
       <div class="rc-lbl">HELB Loan Overview &amp; Balance — HEF Portal</div>
-      <div class="rc-val">KES ${p.outstandingBalance.toLocaleString()}</div>
+      <div class="rc-val">${balDisplay}</div>
       <div class="rc-sub" style="margin-top:4px;">
-        Loanee: <strong>${S.name}</strong> (National ID: <strong style="color:var(--blue);">${S.nationalId}</strong>)<br>
-        Institution: <strong>${S.institution}</strong> · <strong>Band ${S.band} (${p.band.category})</strong>
+        Loanee: <strong>${S.name || "Authenticated Student"}</strong> (National ID: <strong style="color:var(--blue);">${S.nationalId || "Data not found"}</strong>)<br>
+        Institution: <strong>${S.institution || "Data not found"}</strong> · <strong>${bandLabel}</strong>
       </div>
       <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">
-        <div>Total Awarded Principal: <strong>KES ${p.cumulativeAwardedPrincipal.toLocaleString()}</strong></div>
-        <div>Total Disbursed Loan: <strong>KES ${p.cumulativeDisbursedLoan.toLocaleString()}</strong></div>
+        <div>Total Awarded Principal: <strong>${awardedDisplay}</strong></div>
+        <div>Total Disbursed Loan: <strong>${disbursedDisplay}</strong></div>
         <div>Total Repaid: <strong style="color:var(--green);">KES ${(S.repaid || 0).toLocaleString()}</strong></div>
-        <div>4% Undergraduate Interest: <strong>KES ${p.interestAccrued.toLocaleString()}</strong></div>
+        <div>4% Undergraduate Interest: <strong>KES ${(p.interestAccrued || 0).toLocaleString()}</strong></div>
       </div>
       <div style="margin-top:12px;display:flex;gap:8px;">
         <button class="dl-link" onclick="openStatementModal()">📑 View Full Statement</button>
@@ -1134,25 +1112,28 @@ function cardBalance(p) {
 
 function cardBandBreakdown(p) {
   const b = p.band;
+  const bandLabel = S.band ? `Band ${b.band} (${b.category})` : (S.bandName || "Data not found");
+  const tuitionDisplay = p.annualTuition ? `KES ${p.annualTuition.toLocaleString()} / year` : "Data not found";
+
   return `
     <div class="rc info">
-      <div class="rc-lbl">Kenya HEF Funding Model — Band ${b.band} (${b.category})</div>
+      <div class="rc-lbl">Kenya HEF Funding Model — ${bandLabel}</div>
       <div style="font-size:13px;color:var(--t1);margin-bottom:6px;">
-        Student: <strong>${S.name}</strong> (National ID: <strong>${S.nationalId}</strong>)<br>
-        Programme Cost: <strong>KES ${p.annualTuition.toLocaleString()} / year</strong> (${S.programme} at ${S.institution})
+        Student: <strong>${S.name || "Authenticated Student"}</strong> (National ID: <strong>${S.nationalId || "Data not found"}</strong>)<br>
+        Programme Cost: <strong>${tuitionDisplay}</strong> (${S.programme || "Data not found"} at ${S.institution || "Data not found"})
       </div>
       <div class="band-bar-container">
-        <div class="band-bar-seg seg-schol" style="width:${b.scholarshipPct}%;">${b.scholarshipPct}% Scholarship</div>
-        <div class="band-bar-seg seg-loan" style="width:${b.loanPct}%;">${b.loanPct}% Loan</div>
-        <div class="band-bar-seg seg-house" style="width:${b.householdPct}%;">${b.householdPct}% Household</div>
+        <div class="band-bar-seg seg-schol" style="width:${b.scholarshipPct || 0}%;">${b.scholarshipPct || 0}% Scholarship</div>
+        <div class="band-bar-seg seg-loan" style="width:${b.loanPct || 0}%;">${b.loanPct || 0}% Loan</div>
+        <div class="band-bar-seg seg-house" style="width:${b.householdPct || 0}%;">${b.householdPct || 0}% Household</div>
       </div>
       <div class="band-legend">
-        <div class="legend-item"><div class="legend-dot" style="background:var(--blue);"></div> Scholarship (Govt): <strong>KES ${p.annualScholarship.toLocaleString()}</strong></div>
-        <div class="legend-item"><div class="legend-dot" style="background:var(--yellow);"></div> Tuition Loan (HELB): <strong>KES ${p.annualTuitionLoan.toLocaleString()}</strong></div>
-        <div class="legend-item"><div class="legend-dot" style="background:var(--green);"></div> Household Fee: <strong>KES ${p.annualHouseholdTuition.toLocaleString()}</strong></div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--blue);"></div> Scholarship (Govt): <strong>${p.annualScholarship ? 'KES ' + p.annualScholarship.toLocaleString() : 'Data not found'}</strong></div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--yellow);"></div> Tuition Loan (HELB): <strong>${p.annualTuitionLoan ? 'KES ' + p.annualTuitionLoan.toLocaleString() : 'Data not found'}</strong></div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--green);"></div> Household Fee: <strong>${p.annualHouseholdTuition ? 'KES ' + p.annualHouseholdTuition.toLocaleString() : 'Data not found'}</strong></div>
       </div>
       <div style="margin-top:12px;padding:10px;background:rgba(59,130,246,0.08);border-radius:8px;font-size:12px;line-height:1.5;">
-        💰 <strong>HELB Student Upkeep Stipend:</strong> <strong>KES ${b.upkeepAnnual.toLocaleString()} / year</strong> (KES ${b.upkeepPerSem.toLocaleString()} per semester) deposited into ${S.bankName} (${S.accountNumber}).<br>
+        💰 <strong>HELB Student Upkeep Stipend:</strong> <strong>${b.upkeepAnnual ? 'KES ' + b.upkeepAnnual.toLocaleString() + ' / year (KES ' + b.upkeepPerSem.toLocaleString() + ' per semester)' : 'Data not found'}</strong> deposited into ${S.bankName || 'bank'} (${S.accountNumber || 'account'}).<br>
         🎯 <strong>Target Classification:</strong> ${b.desc}
       </div>
       <div style="margin-top:10px;display:flex;gap:8px;">
@@ -1163,26 +1144,32 @@ function cardBandBreakdown(p) {
 }
 
 function cardDisb(disbursements) {
-  const rows = disbursements.map(d => `
-    <tr>
-      <td>${d.date}</td>
-      <td><strong>${d.academicYear} ${d.semester}</strong><br><small style="color:var(--t3);">${d.purpose}</small></td>
-      <td>KES ${d.amount.toLocaleString()}</td>
-      <td><span class="badge ${d.status === 'Disbursed' ? 'done' : 'pending'}">${d.status}</span></td>
-    </tr>`).join("");
+  const bandLabel = S.band ? `Band ${S.band}` : (S.bandName || "Data not found");
+  let rows = "";
+  if (Array.isArray(disbursements) && disbursements.length > 0) {
+    rows = disbursements.map(d => `
+      <tr>
+        <td>${d.date || "-"}</td>
+        <td><strong>${d.academicYear || ""} ${d.semester || ""}</strong><br><small style="color:var(--t3);">${d.purpose || ""}</small></td>
+        <td>${typeof d.amount === 'number' ? 'KES ' + d.amount.toLocaleString() : (d.amount || "-")}</td>
+        <td><span class="badge ${d.status === 'Disbursed' ? 'done' : 'pending'}">${d.status || 'Active'}</span></td>
+      </tr>`).join("");
+  } else {
+    rows = `<tr><td colspan="4" style="text-align:center;color:var(--t3);padding:14px;">No disbursement schedule records found on HEF portal for this loanee.</td></tr>`;
+  }
 
   return `
     <div class="rc info">
-      <div class="rc-lbl">HEF &amp; HELB Disbursement Schedule — ${S.institution}</div>
+      <div class="rc-lbl">HEF &amp; HELB Disbursement Schedule — ${S.institution || "HEF Portal"}</div>
       <div style="font-size:12px;color:var(--t2);margin-bottom:8px;">
-        Loanee: <strong>${S.name}</strong> (National ID: <strong>${S.nationalId}</strong>) · <strong>Band ${S.band}</strong>
+        Loanee: <strong>${S.name || "Authenticated Student"}</strong> (National ID: <strong>${S.nationalId || "Data not found"}</strong>) · <strong>${bandLabel}</strong>
       </div>
       <table class="rc-table">
         <thead><tr><th>Release Date</th><th>Semester &amp; Type</th><th>Amount</th><th>Status</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <div class="rc-sub" style="margin-top:10px;">
-        💡 <strong>Tuition loans &amp; scholarships</strong> are credited directly to ${S.institution}'s collection account. <strong>Upkeep stipends</strong> are deposited into your registered ${S.bankName} account (${S.accountNumber}).
+        💡 <strong>Tuition loans &amp; scholarships</strong> are credited directly to ${S.institution || "institution"}'s collection account. <strong>Upkeep stipends</strong> are deposited into your registered ${S.bankName || "bank"} account (${S.accountNumber || "account"}).
       </div>
     </div>`;
 }

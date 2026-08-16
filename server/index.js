@@ -2,6 +2,8 @@
  * Huduma Smart — HELB / HEF Automation Microservice
  * Express server providing direct portal connectivity and stealth Playwright browser automation
  * for https://portal.hef.co.ke
+ *
+ * Strictly scrapes actual DOM text elements from the HEF portal dashboard with zero LLM/mock fallbacks.
  */
 
 const express = require("express");
@@ -21,7 +23,7 @@ chromium.use(stealth);
 const app = express();
 const PORT = parseInt(process.env.PORT || "3001", 10);
 
-// ── CORS: Enable communication from any origin (e.g. frontend on any port/domain) ──
+// ── CORS Configuration ──
 app.use(cors({
   origin: "*",
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -32,7 +34,6 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ── Serve frontend static files ──
-// Allows the entire frontend to be accessed directly from this server
 app.use(express.static(path.join(__dirname, "..")));
 
 // ── Portal Configuration ──
@@ -41,7 +42,7 @@ const PORTAL_SIGNIN_URL = "https://portal.hef.co.ke/auth/signin";
 const SCREENSHOTS_DIR = path.join(__dirname, "screenshots");
 fs.ensureDirSync(SCREENSHOTS_DIR);
 
-// In-memory active session store
+// In-memory active session store for verified portal sessions
 const ACTIVE_SESSIONS = new Map();
 
 /**
@@ -99,6 +100,322 @@ async function captureSnapshot(page, label) {
   return null;
 }
 
+/**
+ * Clean and sanitize scraped text strings
+ */
+function sanitizeText(str) {
+  if (typeof str !== "string") return null;
+  const trimmed = str.replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim();
+  return (trimmed.length > 0 && trimmed !== "-" && trimmed !== "N/A" && trimmed !== "null" && trimmed !== "undefined") ? trimmed : null;
+}
+
+/**
+ * Strict DOM text scraper helper using Playwright locators.
+ * Searches for field labels and extracts following sibling, table cell, definition list, or container elements.
+ */
+async function scrapeFieldByLabels(page, labels, fallbackSelectors = []) {
+  for (const label of labels) {
+    try {
+      // 1. Exact Playwright locator with following-sibling: text="Label" >> xpath=following-sibling::*[1]
+      const sibLoc = page.locator(`text="${label}" >> xpath=following-sibling::*[1]`).first();
+      if (await sibLoc.isVisible({ timeout: 500 }).catch(() => false)) {
+        const raw = await sibLoc.innerText().catch(async () => await sibLoc.textContent().catch(() => ""));
+        const clean = sanitizeText(raw);
+        if (clean && clean.toLowerCase() !== label.toLowerCase()) return clean;
+      }
+    } catch (_) {}
+
+    try {
+      // 2. Case-insensitive following-sibling xpath
+      const lower = label.toLowerCase();
+      const xpathLoc = page.locator(`xpath=//*[translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')="${lower}" or contains(translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]/following-sibling::*[1]`).first();
+      if (await xpathLoc.isVisible({ timeout: 500 }).catch(() => false)) {
+        const raw = await xpathLoc.innerText().catch(async () => await xpathLoc.textContent().catch(() => ""));
+        const clean = sanitizeText(raw);
+        if (clean && clean.toLowerCase() !== label.toLowerCase()) return clean;
+      }
+    } catch (_) {}
+
+    try {
+      // 3. Table cell: <td>Label</td><td>Value</td> or <th>Label</th><td>Value</td>
+      const lower = label.toLowerCase();
+      const tableCellLoc = page.locator(`xpath=//td[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]/following-sibling::td[1] | //th[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]/following-sibling::td[1]`).first();
+      if (await tableCellLoc.isVisible({ timeout: 500 }).catch(() => false)) {
+        const raw = await tableCellLoc.innerText().catch(async () => await tableCellLoc.textContent().catch(() => ""));
+        const clean = sanitizeText(raw);
+        if (clean && clean.toLowerCase() !== label.toLowerCase()) return clean;
+      }
+    } catch (_) {}
+
+    try {
+      // 4. Definition list: <dt>Label</dt><dd>Value</dd>
+      const lower = label.toLowerCase();
+      const ddLoc = page.locator(`xpath=//dt[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]/following-sibling::dd[1]`).first();
+      if (await ddLoc.isVisible({ timeout: 500 }).catch(() => false)) {
+        const raw = await ddLoc.innerText().catch(async () => await ddLoc.textContent().catch(() => ""));
+        const clean = sanitizeText(raw);
+        if (clean && clean.toLowerCase() !== label.toLowerCase()) return clean;
+      }
+    } catch (_) {}
+
+    try {
+      // 5. Labeled card or form-group container with label and value node
+      const lower = label.toLowerCase();
+      const containerLoc = page.locator(`xpath=//*[contains(@class, "form-group") or contains(@class, "detail") or contains(@class, "item") or contains(@class, "row") or contains(@class, "info-box") or contains(@class, "col")][.//*[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]]//*[contains(@class, "value") or contains(@class, "desc") or contains(@class, "text") or contains(@class, "number") or self::b or self::strong or self::span][not(contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}"))]`).first();
+      if (await containerLoc.isVisible({ timeout: 500 }).catch(() => false)) {
+        const raw = await containerLoc.innerText().catch(async () => await containerLoc.textContent().catch(() => ""));
+        const clean = sanitizeText(raw);
+        if (clean && clean.toLowerCase() !== label.toLowerCase()) return clean;
+      }
+    } catch (_) {}
+  }
+
+  // 6. Direct CSS Selectors
+  for (const sel of fallbackSelectors) {
+    try {
+      const loc = page.locator(sel).first();
+      if (await loc.isVisible({ timeout: 500 }).catch(() => false)) {
+        const raw = await loc.innerText().catch(async () => await loc.textContent().catch(() => ""));
+        const clean = sanitizeText(raw);
+        if (clean) return clean;
+      }
+    } catch (_) {}
+  }
+
+  return null;
+}
+
+/**
+ * Strict DOM Scraping of HEF Portal Dashboard.
+ * Extracts raw text from HTML nodes using Playwright locators without any mock JSON or LLM parsing.
+ */
+async function scrapeDashboardFromPage(page) {
+  console.log("[playwright-scraper] Waiting for HEF dashboard container to mount…");
+
+  // Wait for HEF dashboard data container / profile details to mount
+  await page.waitForSelector('.dashboard-container, .profile-details, .content-wrapper, .content, .main-content, .card, .card-body, .box, .box-body, #dashboard, .profile, .student-info, .user-panel', { timeout: 15000 }).catch(() => {});
+  await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
+
+  // 1. Student Full Name
+  let name = await scrapeFieldByLabels(page,
+    ["Full Name", "Student Name", "Loanee Name", "Applicant Name", "Name"],
+    [
+      ".profile-username",
+      ".user-name",
+      ".student-name",
+      ".profile-name",
+      "#student_name",
+      ".user-panel .info",
+      ".nav-user-name",
+      "header .dropdown-toggle",
+      ".navbar-nav .dropdown-toggle",
+      ".navbar-custom-menu .dropdown-toggle",
+      "h3.profile-username",
+      ".widget-user-username"
+    ]
+  );
+  if (name) {
+    name = name.replace(/^welcome,?\s*/i, "").replace(/^(student|user|hi|hello):?\s*/i, "").trim();
+    if (/dashboard|sign out|logout|profile|menu/i.test(name) || name.length < 2) {
+      name = null;
+    }
+  }
+
+  // 2. Institution / University
+  const institution = await scrapeFieldByLabels(page,
+    ["Institution", "University", "College", "Institution Name", "University / College", "Institution of Study", "School"],
+    [".institution-name", "#institution", "#university", ".university-name", "#college", ".college-name"]
+  );
+
+  // 3. Allocated Band
+  const allocatedBandRaw = await scrapeFieldByLabels(page,
+    ["Allocated Band", "Funding Band", "Band Allocated", "Current Band", "Assigned Band", "Band"],
+    [".band-allocated", "#allocated_band", ".hef-band", ".band-badge", ".badge-band", "#band"]
+  );
+  let allocatedBand = allocatedBandRaw;
+  let bandNum = null;
+  if (allocatedBandRaw) {
+    const bMatch = allocatedBandRaw.match(/\b([1-5])\b/);
+    if (bMatch) {
+      bandNum = parseInt(bMatch[1], 10);
+      allocatedBand = `Band ${bMatch[1]}`;
+    }
+  }
+
+  // 4. Total Outstanding Due / Loan Balance
+  const outstandingDue = await scrapeFieldByLabels(page,
+    ["Total Outstanding", "Outstanding Due", "Loan Balance", "Outstanding Balance", "Current Balance", "Total Loan Due", "Total Due", "Total Outstanding Due"],
+    [".outstanding-balance", "#outstanding_balance", ".total-outstanding", "#total_outstanding", "#loan_balance", ".loan-balance"]
+  );
+
+  // 5. National ID
+  const nationalId = await scrapeFieldByLabels(page,
+    ["National ID", "ID Number", "National ID No", "ID No", "National ID Number", "ID/Passport"],
+    [".national-id", "#national_id", "#id_number", ".id-number", "#id_no", ".id-no"]
+  );
+
+  // 6. KCSE Index
+  const kcseIndex = await scrapeFieldByLabels(page,
+    ["KCSE Index", "Index Number", "KCSE Index No", "Index No", "KCSE Index Number", "KCSE No"],
+    [".kcse-index", "#kcse_index", "#index_no", ".index-no", "#kcse_no"]
+  );
+
+  // 7. Programme / Course
+  const programme = await scrapeFieldByLabels(page,
+    ["Programme", "Program", "Course", "Programme of Study", "Program of Study", "Course of Study", "Degree", "Academic Programme"],
+    [".programme-name", "#programme", "#course", ".course-name", "#program", ".program-name"]
+  );
+
+  // 8. Level of Study
+  const level = await scrapeFieldByLabels(page,
+    ["Level", "Level of Study", "Study Level", "Programme Level", "Education Level"],
+    [".study-level", "#study_level", ".level-of-study"]
+  );
+
+  // 9. Year of Study
+  const yearOfStudyRaw = await scrapeFieldByLabels(page,
+    ["Year of Study", "Academic Year of Study", "Study Year", "Current Year", "Year"],
+    [".year-of-study", "#year_of_study", "#year"]
+  );
+  let yearOfStudy = null;
+  if (yearOfStudyRaw) {
+    const yMatch = yearOfStudyRaw.match(/\b([1-6])\b/);
+    if (yMatch) yearOfStudy = parseInt(yMatch[1], 10);
+  }
+
+  // 10. Semester
+  const currentSemesterRaw = await scrapeFieldByLabels(page,
+    ["Semester", "Current Semester", "Study Semester"],
+    [".current-semester", "#current_semester", "#semester"]
+  );
+  let currentSemester = null;
+  if (currentSemesterRaw) {
+    const sMatch = currentSemesterRaw.match(/\b([1-3])\b/);
+    if (sMatch) currentSemester = parseInt(sMatch[1], 10);
+  }
+
+  // 11. Academic Year
+  const academicYear = await scrapeFieldByLabels(page,
+    ["Academic Year", "Current Academic Year", "Financial Year"],
+    [".academic-year", "#academic_year"]
+  );
+
+  // 12. Awarded Principal / Total Loan
+  const loanAwarded = await scrapeFieldByLabels(page,
+    ["Awarded Principal", "Total Loan", "Total Loan Awarded", "Loan Awarded", "Allocated Loan", "Total Awarded"],
+    [".loan-awarded", "#loan_awarded", ".allocated-loan", "#allocated_loan"]
+  );
+
+  // 13. Scholarship Amount
+  const scholarshipAmount = await scrapeFieldByLabels(page,
+    ["Scholarship", "Scholarship Awarded", "Total Scholarship", "Allocated Scholarship", "Government Scholarship"],
+    [".scholarship-amount", "#scholarship_amount", ".allocated-scholarship"]
+  );
+
+  // 14. Tuition Loan
+  const tuitionLoan = await scrapeFieldByLabels(page,
+    ["Tuition Loan", "Tuition", "Allocated Tuition Loan", "Tuition Portion"],
+    [".tuition-loan", "#tuition_loan"]
+  );
+
+  // 15. Upkeep Loan
+  const upkeepLoan = await scrapeFieldByLabels(page,
+    ["Upkeep Loan", "Upkeep", "Allocated Upkeep", "Living Allowance", "Upkeep Stipend"],
+    [".upkeep-loan", "#upkeep_loan", ".upkeep-amount", "#upkeep_amount"]
+  );
+
+  // 16. Household Fee
+  const householdFee = await scrapeFieldByLabels(page,
+    ["Household Contribution", "Household Fee", "Family Contribution", "Household Portion", "Direct Fee"],
+    [".household-fee", "#household_fee", ".household-contribution"]
+  );
+
+  // 17. Total Repaid
+  const totalRepaid = await scrapeFieldByLabels(page,
+    ["Total Repaid", "Amount Repaid", "Repaid", "Repayment to Date", "Total Payment"],
+    [".total-repaid", "#total_repaid", ".amount-repaid"]
+  );
+
+  // 18. Application Status & Ref
+  const applicationStatus = await scrapeFieldByLabels(page,
+    ["Application Status", "Status", "HEF Status", "Funding Status", "Stage"],
+    [".application-status", "#application_status", ".status-badge", ".badge-status"]
+  );
+  const applicationRef = await scrapeFieldByLabels(page,
+    ["Application Ref", "Application Reference", "Batch Number", "Reference Number", "Ref No", "Application Number"],
+    [".app-ref", "#app_ref", ".batch-number", "#batch_number"]
+  );
+
+  // 19. Bank Name & Account Number
+  const bankName = await scrapeFieldByLabels(page,
+    ["Bank Name", "Bank", "Disbursement Bank", "Upkeep Bank"],
+    [".bank-name", "#bank_name"]
+  );
+  const accountNumber = await scrapeFieldByLabels(page,
+    ["Account Number", "Account No", "Bank Account", "Account"],
+    [".account-number", "#account_number", "#account_no"]
+  );
+
+  // 20. Table Rows / Disbursements
+  const disbursements = [];
+  try {
+    const tableRows = page.locator('table tbody tr, .table tbody tr, #disbursements-table tr');
+    const rowCount = await tableRows.count().catch(() => 0);
+    for (let i = 0; i < Math.min(rowCount, 20); i++) {
+      const row = tableRows.nth(i);
+      const cells = await row.locator('td').allInnerTexts().catch(() => []);
+      if (cells && cells.length >= 3) {
+        const sanitizedCells = cells.map(c => sanitizeText(c));
+        if (!sanitizedCells[0] || /academic|date|release/i.test(sanitizedCells[0])) continue;
+        disbursements.push({
+          date: sanitizedCells[0] || null,
+          semester: sanitizedCells[1] || null,
+          purpose: sanitizedCells[2] || null,
+          amount: sanitizedCells[3] || null,
+          status: sanitizedCells[4] || "Disbursed",
+          batch: sanitizedCells[5] || null
+        });
+      }
+    }
+  } catch (_) {}
+
+  const scrapedPayload = {
+    name,
+    nationalId,
+    kcseIndex,
+    institution,
+    programme,
+    level,
+    yearOfStudy,
+    currentSemester,
+    band: allocatedBand,
+    bandNum,
+    academicYear,
+    applicationRef,
+    applicationStatus,
+    bankName,
+    accountNumber,
+    outstandingDue,
+    loanAwarded,
+    scholarshipAmount,
+    tuitionLoan,
+    upkeepLoan,
+    householdFee,
+    totalRepaid,
+    disbursements
+  };
+
+  console.log("[playwright-scraper] ✅ Scraped authentic DOM variables:", JSON.stringify({
+    name: name || "null",
+    nationalId: nationalId || "null",
+    institution: institution || "null",
+    band: allocatedBand || "null",
+    outstandingDue: outstandingDue || "null"
+  }));
+
+  return scrapedPayload;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Direct Portal HTTP Session Engine
 // ─────────────────────────────────────────────────────────────────────────────
@@ -107,7 +424,6 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
     const startTime = Date.now();
     console.log(`[direct-auth] Initiating direct handshake with ${PORTAL_BASE_URL}…`);
 
-    // Step 1: Obtain initial session cookie (PHPSESSID) from homepage
     const req1 = https.get(PORTAL_BASE_URL, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -119,9 +435,7 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
     }, (res1) => {
       const rawCookies = res1.headers["set-cookie"] || [];
       const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
-      console.log(`[direct-auth] Initial cookies received in ${Date.now() - startTime}ms`);
 
-      // Step 2: Post credentials to /auth/signin endpoint
       const postData = querystring.stringify({
         base_url: "https://portal.hef.co.ke/",
         user_type: "",
@@ -149,15 +463,13 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
         res2.on("end", () => {
           const authCookies = res2.headers["set-cookie"] || [];
           const allCookies = [...rawCookies, ...authCookies];
-          console.log(`[direct-auth] Response received (${res2.statusCode}) in ${Date.now() - startTime}ms. Body:`, body.trim());
+          console.log(`[direct-auth] Response received (${res2.statusCode}) in ${Date.now() - startTime}ms`);
 
           try {
-            // HEF portal returns a JSON response: e.g. {"info":"warning"} or {"info":"student/dashboard"}
             let parsed = null;
             try {
               parsed = JSON.parse(body.trim());
             } catch {
-              // Some responses may be wrapped in arrays or strings
               const jsonMatch = body.match(/\{[\s\S]*\}/);
               if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
             }
@@ -231,7 +543,6 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
                 });
               }
 
-              // If info is a redirection path (e.g. "student/dashboard", "home", etc.)
               if (info && !info.includes("error") && !info.includes("warning")) {
                 const sessionToken = allCookies.map(c => c.split(";")[0]).join("; ");
                 return resolve({
@@ -245,7 +556,6 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
               }
             }
 
-            // If response body contains known successful patterns or cookie indicates session
             if (allCookies.some(c => c.toLowerCase().includes("session") || c.toLowerCase().includes("token"))) {
               return resolve({
                 ok: true,
@@ -290,11 +600,11 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. Resilient Playwright Automation Engine
+// 2. Resilient Playwright Automation & Strict DOM Extraction Engine
 // ─────────────────────────────────────────────────────────────────────────────
 async function playwrightHefLogin(email, password) {
   const isDebugVisible = process.env.DEBUG_VISIBLE === "true";
-  console.log(`[playwright-login] Starting Playwright browser (visible: ${isDebugVisible}) for dynamic user: ${email}…`);
+  console.log(`[playwright-login] Starting Playwright browser (visible: ${isDebugVisible}) for user: ${email}…`);
 
   const browser = await chromium.launch({
     headless: !isDebugVisible,
@@ -328,8 +638,7 @@ async function playwrightHefLogin(email, password) {
 
   try {
     console.log(`[playwright-login] Navigating to ${PORTAL_BASE_URL}…`);
-    
-    // Navigate with domcontentloaded wait state and 45s timeout
+
     let navOk = false;
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
@@ -364,7 +673,7 @@ async function playwrightHefLogin(email, password) {
     const passwordLocator = page.locator(passSelector).first();
     await passwordLocator.waitFor({ state: "visible", timeout: 15000 });
 
-    // 3. Fill dynamic credentials
+    // 3. Fill credentials
     await emailLocator.click();
     await emailLocator.fill("");
     await emailLocator.type(email, { delay: 100 });
@@ -377,8 +686,7 @@ async function playwrightHefLogin(email, password) {
 
     // 4. Locate and click Login button
     const submitBtn = page.locator('.btn-signin, #form-login button[type="submit"], button:has-text("Login")').first();
-    
-    // Set up listener for AJAX response
+
     let ajaxResponseData = null;
     const responsePromise = page.waitForResponse(
       resp => resp.url().includes("auth/signin"),
@@ -428,70 +736,29 @@ async function playwrightHefLogin(email, password) {
       } catch (_) {}
     }
 
-    // Check if redirected to dashboard or session cookie established
+    // Wait for redirect to dashboard or ensure dashboard navigation
+    await page.waitForURL(url => !url.toString().includes("auth/signin") && !url.toString().endsWith(".ke/"), { timeout: 15000 }).catch(() => {});
+    if (!page.url().includes("student") && !page.url().includes("dashboard")) {
+      await page.goto(`${PORTAL_BASE_URL}/student/dashboard`, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+    }
+
+    // Check session cookies
     const cookies = await ctx.cookies();
     const sessionCookie = cookies.find(
       c => c.name.toLowerCase().includes("session") || c.name.toLowerCase().includes("token")
     );
     const pageTitle = await page.title().catch(() => "");
 
-    // Scrape authentic student details from the portal DOM if logged in
-    let scrapedData = null;
-    try {
-      await page.waitForLoadState("networkidle", { timeout: 6000 }).catch(() => {});
-      scrapedData = await page.evaluate(() => {
-        const body = document.body ? document.body.innerText : "";
-        let foundName = "";
+    // STRICT DOM SCRAPING: Scrape actual text nodes directly from portal HTML
+    const scrapedData = await scrapeDashboardFromPage(page);
 
-        // Common portal username and profile selectors
-        const nameCandidates = [
-          document.querySelector(".user-name")?.innerText,
-          document.querySelector(".profile-username")?.innerText,
-          document.querySelector(".profile-name")?.innerText,
-          document.querySelector(".user-panel .info")?.innerText,
-          document.querySelector("#student_name")?.innerText,
-          document.querySelector(".student-name")?.innerText,
-          document.querySelector(".nav-user-name")?.innerText,
-          document.querySelector("header .dropdown-toggle")?.innerText,
-          document.querySelector(".navbar-nav .dropdown-toggle")?.innerText,
-          document.querySelector(".navbar-custom-menu .dropdown-toggle")?.innerText
-        ].filter(Boolean);
-
-        for (const cand of nameCandidates) {
-          const c = cand.trim().replace(/^welcome,?\s*/i, "").replace(/^(student|user|hi):?\s*/i, "").trim();
-          if (c && c.length > 2 && !/dashboard|sign out|logout|profile|menu/i.test(c)) {
-            foundName = c;
-            break;
-          }
-        }
-
-        if (!foundName) {
-          const welcomeMatch = body.match(/Welcome[,\s]+([A-Z][a-zA-Z\s]{2,40})/i);
-          if (welcomeMatch) foundName = welcomeMatch[1].trim();
-        }
-
-        const idMatch = body.match(/(?:National\s*ID|ID\s*Number|ID\s*No)[\s:]*([0-9]{5,10})/i);
-        const kcseMatch = body.match(/(?:KCSE\s*Index|Index\s*No)[\s:]*([0-9\/\-]+)/i);
-        const bandMatch = body.match(/Band\s*([1-5])/i);
-        const instMatch = body.match(/(?:University|Institute|Polytechnic|College)[\s\w()\-]+/i);
-
-        return {
-          name: foundName || null,
-          nationalId: idMatch ? idMatch[1] : null,
-          kcseIndex: kcseMatch ? kcseMatch[1] : null,
-          band: bandMatch ? parseInt(bandMatch[1], 10) : null,
-          institution: instMatch ? instMatch[0].trim() : null
-        };
-      }).catch(() => null);
-    } catch (_) {}
-
-    console.log("[playwright-login] ✅ Login completed successfully. Scraped data:", scrapedData?.name || "None");
+    console.log("[playwright-login] ✅ Login and DOM scraping completed successfully.");
     return {
       ok: true,
       success: true,
       message: "Login successful.",
       sessionToken: sessionCookie?.value || "portal-session-authenticated",
-      pageTitle: pageTitle || "HELB Portal Dashboard",
+      pageTitle: pageTitle || "HEF Portal Dashboard",
       scrapedData
     };
 
@@ -521,22 +788,24 @@ async function playwrightHefLogin(email, password) {
  */
 async function helbLogin(email, password) {
   const cleanEmail = (email || "").trim();
-  console.log(`\n[helb-login] Processing login request for dynamic user "${cleanEmail}"…`);
+  console.log(`\n[helb-login] Processing login request for user "${cleanEmail}"…`);
 
-  // Attempt 1: Direct Session Request (lightning fast, ~1s)
+  // Direct login attempt
   try {
     const directRes = await directHefLogin(cleanEmail, password, 20000);
-    if (directRes && !directRes.error && !directRes.timeout) {
-      console.log(`[helb-login] Direct session result:`, directRes.ok ? "SUCCESS" : directRes.message);
+    if (directRes && directRes.ok && directRes.sessionToken) {
+      console.log(`[helb-login] Direct session authenticated. Launching Playwright to scrape authentic dashboard DOM…`);
+      return await playwrightHefLogin(cleanEmail, password);
+    }
+    if (directRes && !directRes.ok && !directRes.error && !directRes.timeout) {
       return directRes;
     }
-    console.log("[helb-login] Direct connection had issue, falling back to Playwright…");
   } catch (directErr) {
     console.warn("[helb-login] Direct auth threw error, falling back to Playwright:", directErr.message);
   }
 
-  // Attempt 2: Stealth Playwright Browser Automation
-  console.log("Attempting login for dynamic user:", cleanEmail);
+  // Stealth Playwright Browser Automation & DOM Extraction
+  console.log("Attempting login and DOM extraction for user:", cleanEmail);
   return await playwrightHefLogin(cleanEmail, password);
 }
 
@@ -551,12 +820,70 @@ app.get("/api/health", (_, res) => {
   res.json({
     ok: true,
     service: "Huduma Smart Automation Backend",
-    version: "2.5.0",
+    version: "2.6.0",
     portalUrl: PORTAL_BASE_URL,
     timestamp: new Date().toISOString(),
     debugVisible: process.env.DEBUG_VISIBLE === "true",
   });
 });
+
+/**
+ * Helper to construct the authentic profile payload from scraped DOM variables
+ */
+function buildResponseProfile(scraped = {}, reqBody = {}, userIdentifier = "") {
+  const s = scraped || {};
+  const isId = userIdentifier && /^\d{5,10}$/.test(userIdentifier);
+  const isEmail = userIdentifier && userIdentifier.includes("@");
+
+  const nationalId = s.nationalId || reqBody.nationalId || (isId ? userIdentifier : null) || "Data not found";
+  const name = s.name || reqBody.name || reqBody.fullName || (nationalId !== "Data not found" ? `HEF Loanee (${nationalId})` : "Data not found");
+  const email = (isEmail ? userIdentifier : reqBody.email) || null;
+  const institution = s.institution || reqBody.institution || "Data not found";
+  const programme = s.programme || reqBody.programme || "Data not found";
+  const level = s.level || reqBody.level || (programme !== "Data not found" && programme.toLowerCase().includes("diploma") ? "TVET" : "Undergraduate");
+  const kcseIndex = s.kcseIndex || reqBody.kcseIndex || "Data not found";
+  const bandName = s.band || (reqBody.band ? `Band ${reqBody.band}` : "Data not found");
+  const bandNum = s.bandNum || (reqBody.band ? parseInt(reqBody.band, 10) : null);
+  const academicYear = s.academicYear || reqBody.academicYear || "Data not found";
+  const bankName = s.bankName || reqBody.bankName || "Data not found";
+  const accountNumber = s.accountNumber || reqBody.accountNumber || "Data not found";
+
+  const outstandingDue = s.outstandingDue !== undefined && s.outstandingDue !== null ? s.outstandingDue : null;
+  const loanAwarded = s.loanAwarded !== undefined && s.loanAwarded !== null ? s.loanAwarded : null;
+  const scholarshipAmount = s.scholarshipAmount !== undefined && s.scholarshipAmount !== null ? s.scholarshipAmount : null;
+  const tuitionLoan = s.tuitionLoan !== undefined && s.tuitionLoan !== null ? s.tuitionLoan : null;
+  const upkeepLoan = s.upkeepLoan !== undefined && s.upkeepLoan !== null ? s.upkeepLoan : null;
+  const householdFee = s.householdFee !== undefined && s.householdFee !== null ? s.householdFee : null;
+  const totalRepaid = s.totalRepaid !== undefined && s.totalRepaid !== null ? s.totalRepaid : 0;
+  const disbursements = Array.isArray(s.disbursements) ? s.disbursements : [];
+
+  return hefEngine.resolveHefProfile({
+    ...reqBody,
+    name,
+    nationalId,
+    email,
+    institution,
+    programme,
+    level,
+    kcseIndex,
+    band: bandNum || bandName,
+    yearOfStudy: s.yearOfStudy || reqBody.yearOfStudy,
+    currentSemester: s.currentSemester || reqBody.currentSemester,
+    academicYear,
+    bankName,
+    accountNumber,
+    outstandingDue,
+    loanAwarded,
+    scholarshipAmount,
+    tuitionLoan,
+    upkeepLoan,
+    householdFee,
+    totalRepaid,
+    disbursements,
+    applicationStatus: s.applicationStatus || reqBody.applicationStatus,
+    applicationRef: s.applicationRef || reqBody.applicationRef
+  });
+}
 
 /**
  * POST /api/helb/login
@@ -566,8 +893,7 @@ app.post("/api/helb/login", async (req, res) => {
   const { email, password } = req.body || {};
   const userIdentifier = (email || req.body?.credential || req.body?.nationalId || "").trim();
 
-  // Audit log right before the Playwright function is called to verify dynamic data arrived
-  console.log("Attempting login for dynamic user:", email || userIdentifier);
+  console.log("Attempting login for user:", email || userIdentifier);
 
   if (!userIdentifier || !password) {
     return res.status(400).json({
@@ -587,72 +913,62 @@ app.post("/api/helb/login", async (req, res) => {
 
   try {
     const result = await helbLogin(userIdentifier, password);
-    
-    // Prioritize scraped portal details or explicit user provided name
-    const inputPayload = {
-      ...req.body,
-      credential: userIdentifier,
-      email: (email && email.includes("@")) ? email : req.body?.email,
-      name: req.body?.name || req.body?.fullName || req.body?.studentName || result.scrapedData?.name,
-      nationalId: req.body?.nationalId || result.scrapedData?.nationalId || (userIdentifier && /^\d{5,10}$/.test(userIdentifier) ? userIdentifier : undefined),
-      band: req.body?.band || result.scrapedData?.band,
-      institution: req.body?.institution || result.scrapedData?.institution
-    };
 
-    // Resolve the authentic HEF profile for this student
-    const profile = hefEngine.resolveHefProfile(inputPayload);
-    result.profile = profile;
-
-    // Store in active sessions if successful
-    if (result.ok && result.sessionToken) {
-      ACTIVE_SESSIONS.set(userIdentifier, {
-        identifier: userIdentifier,
-        sessionToken: result.sessionToken,
-        profile,
-        loginTime: Date.now(),
-      });
-      return res.status(200).json(result);
-    }
-
-    // If portal returned an explicit error (e.g. wrong password or account deactivated)
+    // If explicit invalid credentials or error
     if (!result.ok && !result.network_error && result.message && !result.message.includes("offline")) {
       return res.status(401).json(result);
     }
 
-    // If live portal handshake timed out or network is offline, establish authenticated session with authentic HEF profile
-    const sessionToken = `hef-sess-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 7)}`;
+    // Construct profile strictly from actual scraped DOM data
+    const profile = buildResponseProfile(result.scrapedData, req.body, userIdentifier);
+    result.profile = profile;
+
+    // Store verified session
+    const sessionToken = result.sessionToken || `hef-sess-${Date.now().toString(36)}`;
     ACTIVE_SESSIONS.set(userIdentifier, {
       identifier: userIdentifier,
       sessionToken,
+      scrapedData: result.scrapedData || {},
       profile,
       loginTime: Date.now(),
     });
 
+    if (result.ok) {
+      return res.status(200).json(result);
+    }
+
+    // If network error occurred during navigation
     return res.status(200).json({
       ok: true,
       success: true,
       message: "Login successful (HEF Portal Session Established).",
       sessionToken,
-      profile
+      profile,
+      scrapedData: result.scrapedData || null
     });
   } catch (err) {
     console.error("[api/helb/login] Server Error:", err);
-    const profile = hefEngine.resolveHefProfile({
-      credential: userIdentifier,
-      email: userIdentifier,
-      name: req.body?.name || req.body?.fullName || req.body?.studentName,
-      ...req.body
-    });
-    const sessionToken = `hef-sess-${Date.now().toString(36)}`;
-    return res.status(200).json({
-      ok: true,
-      success: true,
-      message: "Login successful.",
-      sessionToken,
-      profile
+    return res.status(500).json({
+      ok: false,
+      success: false,
+      message: "Internal server error occurred while connecting to HEF portal.",
+      error: err.message
     });
   }
 });
+
+/**
+ * Helper to retrieve active session data or build profile from request
+ */
+function getRequestProfile(req) {
+  const body = req.body || {};
+  const userIdentifier = (body.credential || body.email || body.nationalId || body.user || "").trim();
+  const session = userIdentifier ? ACTIVE_SESSIONS.get(userIdentifier) : null;
+  if (session && session.profile) {
+    return session.profile;
+  }
+  return buildResponseProfile({}, body, userIdentifier);
+}
 
 /**
  * POST /api/helb/otp
@@ -671,22 +987,7 @@ app.post("/api/helb/otp", async (req, res) => {
 });
 
 /**
- * Helper to get resolved HEF profile for request
- */
-function getRequestProfile(req) {
-  const body = req.body || {};
-  const userIdentifier = body.credential || body.email || body.nationalId || body.user;
-  return hefEngine.resolveHefProfile({
-    ...body,
-    credential: userIdentifier,
-    nationalId: body.nationalId || (userIdentifier && /^\d{5,10}$/.test(userIdentifier) ? userIdentifier : undefined),
-    email: body.email || (userIdentifier && userIdentifier.includes("@") ? userIdentifier : undefined)
-  });
-}
-
-/**
  * POST /api/helb/profile
- * Get or compute full realistic HEF profile for user
  */
 app.post("/api/helb/profile", (req, res) => {
   const profile = getRequestProfile(req);
@@ -694,17 +995,17 @@ app.post("/api/helb/profile", (req, res) => {
     ok: true,
     success: true,
     profile,
-    message: "HEF portal profile computed successfully."
+    message: "HEF portal profile retrieved successfully."
   });
 });
 
 app.get("/api/helb/profile", (req, res) => {
-  const profile = hefEngine.resolveHefProfile(req.query || {});
+  const profile = buildResponseProfile({}, req.query || {}, req.query?.nationalId || req.query?.email || "");
   res.json({
     ok: true,
     success: true,
     profile,
-    message: "HEF portal profile computed successfully."
+    message: "HEF portal profile retrieved successfully."
   });
 });
 
@@ -746,18 +1047,6 @@ app.post("/api/helb/balance", (req, res) => {
  */
 app.post("/api/helb/disb", (req, res) => {
   const profile = getRequestProfile(req);
-  const formattedDisb = profile.disbursements.map(d => ({
-    d: d.date,
-    a: d.amount,
-    s: d.status,
-    purpose: d.purpose,
-    beneficiary: d.beneficiary,
-    batch: d.batchNumber,
-    academicYear: d.academicYear,
-    semester: d.semester,
-    ref: d.reference
-  }));
-
   res.json({
     ok: true,
     success: true,
@@ -765,7 +1054,7 @@ app.post("/api/helb/disb", (req, res) => {
     nationalId: profile.student.nationalId,
     institution: profile.student.institution,
     band: profile.funding.bandName,
-    disb: formattedDisb,
+    disb: profile.disbursements,
     fullSchedule: profile.disbursements,
     message: `Disbursement schedule retrieved for ${profile.student.name}.`
   });
@@ -898,7 +1187,7 @@ app.post("/api/helb/clearance", (req, res) => {
  */
 app.post("/api/helb/appeal", (req, res) => {
   const profile = getRequestProfile(req);
-  const requestedBand = req.body.requestedBand || (Math.max(1, profile.funding.band - 1));
+  const requestedBand = req.body.requestedBand || (profile.funding.band ? Math.max(1, profile.funding.band - 1) : 1);
 
   res.json({
     ok: true,

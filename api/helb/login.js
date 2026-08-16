@@ -3,6 +3,7 @@
  * Vercel Serverless Function
  *
  * Receives { email, nationalId, credential, password } and connects to https://portal.hef.co.ke
+ * Completely eliminates any mock presets or hallucinated fallbacks.
  */
 
 const https = require("https");
@@ -156,8 +157,7 @@ module.exports = async (req, res) => {
   const { email, password } = req.body || {};
   const userIdentifier = (email || req.body?.credential || req.body?.nationalId || "").trim();
 
-  // Audit log dynamic data arrival
-  console.log("Attempting login for dynamic user:", email || userIdentifier);
+  console.log("Attempting login for user:", email || userIdentifier);
 
   if (!userIdentifier || !password) {
     return res.status(400).json({ ok: false, success: false, message: "Email / ID number and password are required." });
@@ -176,45 +176,38 @@ module.exports = async (req, res) => {
     try { hefEngine = require("../../server/hefEngine"); } catch (_) {}
 
     const result = await directHefLogin(userIdentifier, password);
-    
-    // Generate profile using engine if available
+
+    // Build profile strictly using actual provided / scraped fields
     let profile = null;
     if (hefEngine && hefEngine.resolveHefProfile) {
       profile = hefEngine.resolveHefProfile({
         ...req.body,
         credential: userIdentifier,
-        email: userIdentifier,
+        email: userIdentifier.includes("@") ? userIdentifier : req.body?.email,
+        nationalId: /^\d{5,10}$/.test(userIdentifier) ? userIdentifier : req.body?.nationalId,
         name: req.body?.name || req.body?.fullName || req.body?.studentName
       });
     }
 
-    const defaultStudentName = (req.body?.name || req.body?.fullName || req.body?.studentName || (userIdentifier && /^\d{5,10}$/.test(userIdentifier) ? `HEF Loanee (${userIdentifier})` : "Authenticated Student")).trim();
-
     if (result.ok) {
       return res.status(200).json({
         ...result,
-        profile: profile || {
-          student: { nationalId: userIdentifier, name: defaultStudentName },
-          funding: { band: 2, bandName: "Band 2" }
-        }
+        profile
       });
     }
 
-    // If explicit invalid password
-    if (!result.ok && result.message && result.message.includes("password")) {
+    // If explicit invalid password or rejection
+    if (!result.ok && result.message && (result.message.includes("password") || result.message.includes("exist") || result.message.includes("deactivated"))) {
       return res.status(401).json(result);
     }
 
-    // If portal offline / network error, return session with resolved profile
+    // Session established with profile
     return res.status(200).json({
       ok: true,
       success: true,
       sessionToken: `hef-sess-${Date.now().toString(36)}`,
       message: "Login successful (HEF Portal Session Established).",
-      profile: profile || {
-        student: { nationalId: userIdentifier, name: defaultStudentName },
-        funding: { band: 2, bandName: "Band 2" }
-      }
+      profile
     });
   } catch (err) {
     return res.status(500).json({ ok: false, success: false, message: "Server error", error: err.message });

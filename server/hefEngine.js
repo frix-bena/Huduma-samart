@@ -1,10 +1,10 @@
 /**
  * Huduma Smart — Higher Education Financing (HEF) & HELB Engine
- * Implements the exact Kenya HEF Student-Centered Funding Model (Bands 1 - 5 & TVET)
- * and realistic portal data generation for user details.
+ * Implements Kenya HEF Student-Centered Funding Model (Bands 1 - 5 & TVET)
+ * Strictly processes actual scraped portal data without mock presets or hallucinated fallbacks.
  */
 
-// Preset Kenyan Universities & Institutions with realistic tuition costs
+// Official Kenyan Universities & Institutions reference data
 const INSTITUTIONS = [
   { name: "University of Nairobi (UoN)", code: "UON", standardTuition: 216000 },
   { name: "Kenyatta University (KU)", code: "KU", standardTuition: 204000 },
@@ -25,7 +25,7 @@ const INSTITUTIONS = [
   { name: "Kabete National Polytechnic", code: "KNP", standardTuition: 67189, level: "TVET" }
 ];
 
-// Preset Programme Costs per academic year in KES
+// Kenyan Higher Education Programme Costs per academic year in KES
 const PROGRAMMES = {
   "medicine": { name: "Bachelor of Medicine and Bachelor of Surgery (MBChB)", cost: 440000, level: "Undergraduate", duration: 6 },
   "nursing": { name: "Bachelor of Science in Nursing", cost: 275400, level: "Undergraduate", duration: 4 },
@@ -115,81 +115,7 @@ const HEF_BANDS = {
 };
 
 /**
- * Deterministic hash from string for consistent realistic mock generation
- */
-function hashString(str) {
-  let hash = 0;
-  if (!str || str.length === 0) return 12345;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-const PRESETS = {
-  "38492018": {
-    name: "Brian Kiprop Cheruiyot",
-    nationalId: "38492018",
-    email: "brian.cheruiyot@students.ku.ac.ke",
-    phone: "+254 712 345 678",
-    kcseIndex: "12345678001/2022",
-    institution: "Kenyatta University (KU)",
-    programme: "Bachelor of Science in Computer Science",
-    level: "Undergraduate",
-    yearOfStudy: 2,
-    currentSemester: 1,
-    band: 2,
-    academicYear: "2024/2025",
-    bankName: "Equity Bank Kenya",
-    accountNumber: "0112938472901",
-    repaid: 0,
-    penalty: 0
-  },
-  "39102948": {
-    name: "Faith Wanjiku Mwangi",
-    nationalId: "39102948",
-    email: "faith.wanjiku@students.uonbi.ac.ke",
-    phone: "+254 722 987 654",
-    kcseIndex: "11200001004/2021",
-    institution: "University of Nairobi (UoN)",
-    programme: "Bachelor of Medicine and Bachelor of Surgery (MBChB)",
-    level: "Undergraduate",
-    yearOfStudy: 3,
-    currentSemester: 1,
-    band: 1,
-    academicYear: "2024/2025",
-    bankName: "KCB Bank Kenya",
-    accountNumber: "1289401928",
-    repaid: 0,
-    penalty: 0
-  },
-  "36829104": {
-    name: "Kevin Otieno Omondi",
-    nationalId: "36829104",
-    email: "kevin.otieno@students.jkuat.ac.ke",
-    phone: "+254 733 456 789",
-    kcseIndex: "20400002019/2020",
-    institution: "Jomo Kenyatta University of Agriculture and Technology (JKUAT)",
-    programme: "Bachelor of Science in Electrical & Electronic Engineering",
-    level: "Undergraduate",
-    yearOfStudy: 4,
-    currentSemester: 1,
-    band: 3,
-    academicYear: "2024/2025",
-    bankName: "Co-operative Bank of Kenya",
-    accountNumber: "01192847192",
-    repaid: 15000,
-    penalty: 0
-  }
-};
-
-/**
- * Find or generate realistic user details based on inputs
- */
-/**
- * Helper to clean and format a human readable name from an email address
+ * Helper to clean and format a human readable name from an email address if needed
  */
 function extractNameFromEmail(email) {
   if (!email || typeof email !== "string" || !email.includes("@")) return "";
@@ -199,251 +125,119 @@ function extractNameFromEmail(email) {
 }
 
 /**
- * Find or generate authentic user details based strictly on actual inputs and portal data
+ * Strictly build a HEF profile object using ONLY actual scraped or user-supplied details.
+ * Completely eliminates any mock presets, random hash formulas, or hallucinated guesses.
  */
 function resolveHefProfile(input = {}) {
-  const cleanId = (input.nationalId || input.credential || input.email || "").trim();
-  
-  // If the user explicitly chose one of the preset loanees by exact ID and didn't override the name
-  if (PRESETS[cleanId] && !input.name && !input.fullName && !input.studentName) {
-    input = { ...PRESETS[cleanId], ...input };
+  // Extract student name strictly without mock generation
+  let name = (input.name || input.fullName || input.studentName || "").trim();
+  if (!name && input.credential && !input.credential.includes("@") && isNaN(input.credential) && input.credential.length > 2) {
+    name = input.credential.trim();
+  } else if (!name && input.email && input.email.includes("@")) {
+    const emailName = extractNameFromEmail(input.email);
+    if (emailName && emailName.length > 2) name = emailName;
+  }
+  if (!name) {
+    name = input.nationalId ? `HEF Loanee (${input.nationalId})` : "Data not found";
   }
 
-  const seed = hashString(input.nationalId || input.email || input.credential || input.name || "38492018");
-  
-  // Resolve Band (default: user provided or 2)
-  let bandNum = parseInt(input.band, 10);
-  if (isNaN(bandNum) || bandNum < 1 || bandNum > 5) {
-    bandNum = (seed % 4) + 1; // 1 to 4
-  }
-  const band = HEF_BANDS[bandNum] || HEF_BANDS[2];
+  // National ID
+  const nationalId = (input.nationalId || (input.credential && /^\d{5,10}$/.test(input.credential) ? input.credential : null)) || "Data not found";
+  const email = input.email || (input.credential && input.credential.includes("@") ? input.credential : null);
+  const phone = input.phone || null;
+  const kcseIndex = input.kcseIndex || "Data not found";
 
-  // Resolve Student Name strictly without generating fake random people
-  let resolvedName = (input.name || input.fullName || input.studentName || "").trim();
-  if (!resolvedName) {
-    if (input.credential && !input.credential.includes("@") && isNaN(input.credential) && input.credential.length > 2) {
-      resolvedName = input.credential.trim();
-    } else if (input.email && input.email.includes("@")) {
-      const emailName = extractNameFromEmail(input.email);
-      if (emailName && emailName.length > 2) {
-        resolvedName = emailName;
-      }
+  // Institution & Programme
+  const institution = input.institution || "Data not found";
+  const programme = input.programme || "Data not found";
+  const level = input.level || (programme !== "Data not found" && programme.toLowerCase().includes("diploma") ? "TVET" : "Undergraduate");
+
+  const yearOfStudy = input.yearOfStudy ? parseInt(input.yearOfStudy, 10) : null;
+  const currentSemester = input.currentSemester ? parseInt(input.currentSemester, 10) : null;
+  const academicYear = input.academicYear || "Data not found";
+
+  // Bank details
+  const bankName = input.bankName || "Data not found";
+  const accountNumber = input.accountNumber || "Data not found";
+
+  // Band resolution: strictly extract from input without guessing random numbers
+  let bandNum = null;
+  if (input.band) {
+    const parsedBand = parseInt(input.band.toString().replace(/[^0-9]/g, ""), 10);
+    if (!isNaN(parsedBand) && parsedBand >= 1 && parsedBand <= 5) {
+      bandNum = parsedBand;
     }
   }
 
-  // Fallback to loanee identification if no name was provided
-  if (!resolvedName) {
-    const fallbackId = input.nationalId || (input.credential && /^\d{5,10}$/.test(input.credential) ? input.credential : "");
-    resolvedName = fallbackId ? `HEF Loanee (${fallbackId})` : "Authenticated Student";
-  }
+  const band = bandNum ? HEF_BANDS[bandNum] : null;
 
-  const name = resolvedName;
-  
-  // National ID / KCSE Index
-  const nationalId = (input.nationalId || (input.credential && /^\d{5,10}$/.test(input.credential) ? input.credential : `${30000000 + (seed % 9999999)}`)).toString().trim();
-  const email = input.email || (input.credential && input.credential.includes("@") ? input.credential : `${name.toLowerCase().replace(/[^a-z0-9]/g, ".") || "student"}@students.ac.ke`);
-  const kcseIndex = input.kcseIndex || `${10000000000 + (seed % 8999999999)}/${2021 + (seed % 3)}`;
-
-  // Institution
-  let institution = input.institution;
-  if (!institution) {
-    const inst = INSTITUTIONS[seed % (INSTITUTIONS.length - 4)];
-    institution = inst.name;
-  }
-
-  // Study Level & Programme
-  let level = input.level || "Undergraduate";
-  let programme = input.programme;
-  let programCost = input.programCost;
-
-  if (!programme) {
-    const progKeys = Object.keys(PROGRAMMES);
-    const selectedKey = progKeys[seed % progKeys.length];
-    const selectedProg = PROGRAMMES[selectedKey];
-    programme = selectedProg.name;
-    programCost = programCost || selectedProg.cost;
-    level = selectedProg.level;
-  } else {
-    // try to match programme cost
+  // Financial values: use scraped values if available, or compute based on verified programme cost & band
+  let programCost = input.programCost || null;
+  if (!programCost && programme !== "Data not found") {
     const lowerP = programme.toLowerCase();
     const matched = Object.entries(PROGRAMMES).find(([k]) => lowerP.includes(k));
-    programCost = programCost || (matched ? matched[1].cost : 216000);
+    if (matched) programCost = matched[1].cost;
   }
 
-  const yearOfStudy = Math.min(Math.max(parseInt(input.yearOfStudy, 10) || ((seed % 3) + 1), 1), 6);
-  const currentSemester = parseInt(input.currentSemester, 10) === 2 ? 2 : 1;
-  const academicYear = input.academicYear || "2024/2025";
+  let scholarshipPct = band ? band.scholarshipPct : null;
+  let loanPct = band ? band.loanPct : null;
+  let householdPct = band ? band.householdPct : null;
 
-  // Bank / Disbursement channel details
-  const banks = ["Equity Bank Kenya", "KCB Bank Kenya", "Co-operative Bank of Kenya", "Postbank Kenya", "M-Pesa Safaricom"];
-  const bankName = input.bankName || banks[seed % banks.length];
-  const accountNumber = input.accountNumber || (bankName.includes("M-Pesa") ? `07${10000000 + (seed % 89999999)}` : `011${1000000000 + (seed % 899999999)}`);
-  const phone = input.phone || `+254 7${10000000 + (seed % 89999999)}`;
+  let annualTuition = programCost;
+  let annualScholarship = (annualTuition && scholarshipPct) ? Math.round(annualTuition * (scholarshipPct / 100)) : null;
+  let annualTuitionLoan = (annualTuition && loanPct) ? Math.round(annualTuition * (loanPct / 100)) : null;
+  let annualHouseholdTuition = (annualTuition && householdPct) ? Math.round(annualTuition * (householdPct / 100)) : null;
+  let annualUpkeepLoan = band ? band.upkeepAnnual : null;
+  let annualTotalLoan = (annualTuitionLoan !== null && annualUpkeepLoan !== null) ? annualTuitionLoan + annualUpkeepLoan : null;
 
-  // ── Calculate HEF Financial Breakdown ──
-  const annualTuition = programCost;
-  const scholarshipPct = band.scholarshipPct;
-  const loanPct = band.loanPct;
-  const householdPct = band.householdPct;
+  let semTuitionLoan = annualTuitionLoan ? Math.round(annualTuitionLoan / 2) : null;
+  let semScholarship = annualScholarship ? Math.round(annualScholarship / 2) : null;
+  let semHouseholdTuition = annualHouseholdTuition ? Math.round(annualHouseholdTuition / 2) : null;
+  let semUpkeepLoan = annualUpkeepLoan ? Math.round(annualUpkeepLoan / 2) : null;
 
-  const annualScholarship = Math.round(annualTuition * (scholarshipPct / 100));
-  const annualTuitionLoan = Math.round(annualTuition * (loanPct / 100));
-  const annualHouseholdTuition = Math.round(annualTuition * (householdPct / 100));
-  const annualUpkeepLoan = band.upkeepAnnual;
+  // Outstanding / Disbursed / Repaid
+  const outstandingBalance = input.outstandingDue !== undefined && input.outstandingDue !== null
+    ? input.outstandingDue
+    : (input.outstandingBalance !== undefined ? input.outstandingBalance : null);
 
-  const annualTotalLoan = annualTuitionLoan + annualUpkeepLoan;
-  const semTuitionLoan = Math.round(annualTuitionLoan / 2);
-  const semScholarship = Math.round(annualScholarship / 2);
-  const semHouseholdTuition = Math.round(annualHouseholdTuition / 2);
-  const semUpkeepLoan = Math.round(annualUpkeepLoan / 2);
+  const awardedPrincipal = input.loanAwarded !== undefined && input.loanAwarded !== null
+    ? input.loanAwarded
+    : (input.awardedPrincipal !== undefined ? input.awardedPrincipal : (annualTotalLoan && yearOfStudy ? annualTotalLoan * yearOfStudy : null));
 
-  // Cumulative calculations based on year of study
-  // e.g. Year 2 Semester 1 = 2 semesters completed, entering 3rd
-  const completedSemesters = (yearOfStudy - 1) * 2 + (currentSemester - 1);
+  const totalDisbursedLoan = input.totalDisbursedLoan || null;
+  const totalDisbursedScholarship = input.scholarshipAmount || input.totalDisbursedScholarship || null;
+  const hasRepaid = input.totalRepaid !== undefined ? input.totalRepaid : (input.repaid !== undefined ? input.repaid : 0);
+  const interestAccrued = input.interestAccrued || null;
+  const penalty = input.penalty || 0;
 
-  const cumulativeAwardedPrincipal = Math.round(annualTotalLoan * yearOfStudy);
-  const cumulativeDisbursedTuitionLoan = Math.round(semTuitionLoan * completedSemesters);
-  const cumulativeDisbursedUpkeepLoan = Math.round(semUpkeepLoan * completedSemesters);
-  const cumulativeDisbursedScholarship = Math.round(semScholarship * completedSemesters);
-  const cumulativeDisbursedLoan = cumulativeDisbursedTuitionLoan + cumulativeDisbursedUpkeepLoan;
+  // Disbursements: strictly use actual scraped disbursement rows if provided
+  const disbursements = Array.isArray(input.disbursements) ? input.disbursements : [];
 
-  // Repayments (for graduated or continuing students who made voluntary payments)
-  const hasRepaid = input.repaid !== undefined ? parseInt(input.repaid, 10) : ((seed % 7 === 0) ? 15000 : (seed % 11 === 0) ? 35500 : 0);
-  const interestRate = 0.04; // 4% p.a.
-  const interestAccrued = Math.round(cumulativeDisbursedLoan * interestRate * Math.max(0.5, yearOfStudy - 1));
-  const penalty = input.penalty !== undefined ? parseInt(input.penalty, 10) : 0;
-  const currentOutstandingBalance = Math.max(0, cumulativeDisbursedLoan + interestAccrued + penalty - hasRepaid);
-
-  // ── Build Realistic Disbursement Schedule ──
-  const disbursements = [];
-  const startCalYear = 2024 - (yearOfStudy - 1);
-
-  for (let yr = 1; yr <= yearOfStudy; yr++) {
-    const acadYr = `${startCalYear + yr - 1}/${startCalYear + yr}`;
-    
-    // Semester 1 (Disbursed in September/October)
-    const sem1Date = `${startCalYear + yr - 1}-09-24`;
-    const isSem1Done = yr < yearOfStudy || (yr === yearOfStudy && currentSemester >= 1);
-    
-    disbursements.push({
-      academicYear: acadYr,
-      semester: "Semester 1",
-      date: sem1Date,
-      purpose: "Upkeep Loan",
-      amount: semUpkeepLoan,
-      beneficiary: `${name} (${bankName} - ${accountNumber})`,
-      batchNumber: `HEF/${acadYr}/UPK/B${bandNum}-${1000 + (seed % 8000) + yr * 10}`,
-      status: isSem1Done ? "Disbursed" : "Scheduled",
-      reference: `MP${hashString(acadYr + sem1Date + 'UPK').toString(36).toUpperCase()}`
-    });
-
-    disbursements.push({
-      academicYear: acadYr,
-      semester: "Semester 1",
-      date: sem1Date,
-      purpose: "Tuition Loan & Scholarship",
-      amount: semTuitionLoan + semScholarship,
-      breakdown: { tuitionLoan: semTuitionLoan, scholarship: semScholarship },
-      beneficiary: `${institution} Fee Collection Account`,
-      batchNumber: `HEF/${acadYr}/TUI/B${bandNum}-${2000 + (seed % 8000) + yr * 10}`,
-      status: isSem1Done ? "Disbursed" : "Scheduled",
-      reference: `TU${hashString(acadYr + sem1Date + 'TUI').toString(36).toUpperCase()}`
-    });
-
-    // Semester 2 (Disbursed in January/February)
-    if (yr < yearOfStudy || (yr === yearOfStudy && currentSemester === 2)) {
-      const sem2Date = `${startCalYear + yr}-02-14`;
-      const isSem2Done = yr < yearOfStudy || (yr === yearOfStudy && currentSemester === 2);
-
-      disbursements.push({
-        academicYear: acadYr,
-        semester: "Semester 2",
-        date: sem2Date,
-        purpose: "Upkeep Loan",
-        amount: semUpkeepLoan,
-        beneficiary: `${name} (${bankName} - ${accountNumber})`,
-        batchNumber: `HEF/${acadYr}/UPK/B${bandNum}-${3000 + (seed % 8000) + yr * 10}`,
-        status: isSem2Done ? "Disbursed" : "Scheduled",
-        reference: `MP${hashString(acadYr + sem2Date + 'UPK').toString(36).toUpperCase()}`
-      });
-
-      disbursements.push({
-        academicYear: acadYr,
-        semester: "Semester 2",
-        date: sem2Date,
-        purpose: "Tuition Loan & Scholarship",
-        amount: semTuitionLoan + semScholarship,
-        breakdown: { tuitionLoan: semTuitionLoan, scholarship: semScholarship },
-        beneficiary: `${institution} Fee Collection Account`,
-        batchNumber: `HEF/${acadYr}/TUI/B${bandNum}-${4000 + (seed % 8000) + yr * 10}`,
-        status: isSem2Done ? "Disbursed" : "Scheduled",
-        reference: `TU${hashString(acadYr + sem2Date + 'TUI').toString(36).toUpperCase()}`
-      });
-    }
-  }
-
-  // ── Build Official HELB Ledger / Statement ──
-  const ledger = [];
-  let runningBal = 0;
-
-  disbursements.filter(d => d.status === "Disbursed").forEach(d => {
-    if (d.purpose === "Upkeep Loan") {
-      runningBal += d.amount;
-      ledger.push({
-        date: d.date,
-        reference: d.reference,
-        description: `Disbursement: ${d.academicYear} ${d.semester} Upkeep Loan to ${bankName}`,
-        debit: d.amount,
-        credit: 0,
-        balance: runningBal
-      });
-    } else if (d.purpose === "Tuition Loan & Scholarship") {
-      runningBal += d.breakdown.tuitionLoan;
-      ledger.push({
-        date: d.date,
-        reference: d.reference,
-        description: `Disbursement: ${d.academicYear} ${d.semester} Tuition Loan to ${institution}`,
-        debit: d.breakdown.tuitionLoan,
-        credit: 0,
-        balance: runningBal
-      });
-    }
-  });
-
-  if (hasRepaid > 0) {
-    runningBal -= hasRepaid;
-    ledger.push({
-      date: "2024-08-10",
-      reference: `MPE${hashString(nationalId + 'PAY').toString(36).toUpperCase()}`,
-      description: "Repayment: M-Pesa Paybill 200800 Direct Settlement",
-      debit: 0,
-      credit: hasRepaid,
-      balance: runningBal
-    });
-  }
+  // Statement ledger
+  const ledger = Array.isArray(input.ledger) ? input.ledger : [];
 
   // Application & Appeal Status
   const appStatus = {
-    applicationRef: `HEF-${academicYear.replace('/', '-')}-${nationalId.slice(-4)}`,
-    status: "Approved",
-    stage: "Funds Allocation & Disbursement Active",
-    bandAllocated: band.name,
-    bandCategory: band.category,
-    dateSubmitted: `${startCalYear}-07-18`,
-    dateEvaluated: `${startCalYear}-08-22`,
-    dateApproved: `${startCalYear}-09-05`,
-    appealEligible: bandNum > 1,
-    appealStatus: input.appealStatus || (bandNum > 1 ? "Eligible to submit appeal" : "Not applicable (Max Band 1)"),
-    mtiScore: 92 - (bandNum * 12) + (seed % 7) // Means Testing Instrument score
+    applicationRef: input.applicationRef || input.appRef || "Data not found",
+    status: input.applicationStatus || input.appStatus || "Data not found",
+    stage: input.stage || "Data not found",
+    bandAllocated: band ? band.name : (input.band ? `Band ${input.band}` : "Data not found"),
+    bandCategory: band ? band.category : "Data not found",
+    dateSubmitted: input.dateSubmitted || "Data not found",
+    dateApproved: input.dateApproved || "Data not found",
+    appealEligible: bandNum ? bandNum > 1 : false,
+    appealStatus: input.appealStatus || (bandNum && bandNum > 1 ? "Eligible to submit appeal" : "Data not found"),
+    mtiScore: input.mtiScore || null
   };
 
-  // Clearance Certificate
+  // Clearance evaluation
+  const isCleared = outstandingBalance === 0 || outstandingBalance === "0" || outstandingBalance === "KES 0";
   const clearance = {
-    eligible: currentOutstandingBalance === 0,
-    certificateType: currentOutstandingBalance === 0 ? "HELB Clearance Certificate" : "Certificate of Compliance (Non-Loanee only)",
-    reason: currentOutstandingBalance === 0 
+    eligible: isCleared,
+    certificateType: isCleared ? "HELB Clearance Certificate" : "Certificate of Compliance (Non-Loanee only)",
+    reason: isCleared
       ? "All loans fully cleared. Eligible for instant official clearance certificate."
-      : `Active loan balance of KES ${currentOutstandingBalance.toLocaleString()} is currently outstanding.`
+      : (outstandingBalance ? `Active loan balance of ${outstandingBalance} is currently outstanding.` : "Data not found")
   };
 
   return {
@@ -464,9 +258,9 @@ function resolveHefProfile(input = {}) {
     },
     funding: {
       band: bandNum,
-      bandName: band.name,
-      bandCategory: band.category,
-      householdIncomeBracket: band.householdIncome,
+      bandName: band ? band.name : (input.band ? `Band ${input.band}` : "Data not found"),
+      bandCategory: band ? band.category : "Data not found",
+      householdIncomeBracket: band ? band.householdIncome : "Data not found",
       programCost: annualTuition,
       percentages: {
         scholarshipPct,
@@ -488,20 +282,20 @@ function resolveHefProfile(input = {}) {
         upkeepLoan: semUpkeepLoan
       },
       cumulative: {
-        awardedPrincipal: cumulativeAwardedPrincipal,
-        totalDisbursedLoan: cumulativeDisbursedLoan,
-        totalDisbursedScholarship: cumulativeDisbursedScholarship,
+        awardedPrincipal,
+        totalDisbursedLoan,
+        totalDisbursedScholarship,
         repaid: hasRepaid,
         interestAccrued,
         penalty,
-        outstandingBalance: currentOutstandingBalance
+        outstandingBalance
       }
     },
     disbursements,
     statement: {
       ledger,
       openingBalance: 0,
-      closingBalance: currentOutstandingBalance,
+      closingBalance: outstandingBalance || 0,
       statementDate: new Date().toISOString().split("T")[0]
     },
     appStatus,
@@ -538,7 +332,7 @@ function isHelbDomainQuery(text = "") {
   const hasDomainKeyword = helbKeywords.some(kw => t.includes(kw));
   if (hasDomainKeyword) return true;
 
-  // Check if user is sharing credentials or numbers (e.g. "My ID is 38291045", "Brian Mwangi", "Band 2", etc.)
+  // Check if user is sharing credentials or numbers
   if (/\b\d{6,10}\b/.test(t) || /\bband\s*[1-5]\b/i.test(t) || /\b(year\s*[1-6]|semester\s*[1-2])\b/i.test(t)) {
     return true;
   }
@@ -547,7 +341,7 @@ function isHelbDomainQuery(text = "") {
 }
 
 /**
- * Extract user details mentioned in conversational chat
+ * Extract user details explicitly provided in conversational chat
  */
 function extractUserDetailsFromText(text = "") {
   const extracted = {};
@@ -571,7 +365,7 @@ function extractUserDetailsFromText(text = "") {
     extracted.yearOfStudy = parseInt(yearMatch[1] || yearMatch[2], 10);
   }
 
-  // Extract Name (e.g., "My name is John Doe", "I am Faith Wanjiku", "Name: Brian Kiprop")
+  // Extract Name
   const nameMatch = text.match(/\b(?:my\s*name\s*is|i\s*am|name\s*is|called)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})/);
   if (nameMatch && nameMatch[1]) {
     const candidate = nameMatch[1].trim();
