@@ -190,10 +190,31 @@ async function scrapeFieldByLabels(page, labels, fallbackSelectors = []) {
  * Extracts raw text from HTML nodes using Playwright locators without any mock JSON or LLM parsing.
  */
 async function scrapeDashboardFromPage(page) {
-  console.log("[playwright-scraper] Waiting for HEF dashboard container to mount…");
+  console.log("[playwright-scraper] Waiting for HEF dashboard dynamic data to render…");
+
+  // 1. WAIT FOR DYNAMIC DATA TO RENDER
+  await page.waitForLoadState('networkidle').catch(() => {});
+  await page.waitForTimeout(3000); // Give React/Angular an extra 3 seconds to render the DOM
+
+  // 2. TAKE A DASHBOARD SCREENSHOT
+  try {
+    await page.screenshot({ path: 'debug-dashboard-fully-loaded.png', fullPage: true });
+    console.log("[playwright-scraper] Saved screenshot to debug-dashboard-fully-loaded.png");
+  } catch (err) {
+    console.warn("[playwright-scraper] Screenshot failed:", err.message);
+  }
+
+  // 3. DUMP THE HTML TO A FILE (Crucial)
+  try {
+    const html = await page.content();
+    fs.writeFileSync('debug-dashboard.html', html);
+    console.log("[playwright-scraper] Saved dashboard HTML to debug-dashboard.html");
+  } catch (err) {
+    console.warn("[playwright-scraper] HTML dump failed:", err.message);
+  }
 
   // Wait for HEF dashboard data container / profile details to mount
-  await page.waitForSelector('.dashboard-container, .profile-details, .content-wrapper, .content, .main-content, .card, .card-body, .box, .box-body, #dashboard, .profile, .student-info, .user-panel', { timeout: 15000 }).catch(() => {});
+  await page.waitForSelector('.dashboard-container, .profile-details, .content-wrapper, .content, .main-content, .card, .card-body, .box, .box-body, #dashboard, .profile, .student-info, .user-panel', { timeout: 10000 }).catch(() => {});
   await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
 
   // 1. Student Full Name
