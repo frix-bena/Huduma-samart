@@ -184,8 +184,7 @@ module.exports = async (req, res) => {
         ...req.body,
         credential: userIdentifier,
         email: userIdentifier.includes("@") ? userIdentifier : req.body?.email,
-        nationalId: /^\d{5,10}$/.test(userIdentifier) ? userIdentifier : req.body?.nationalId,
-        name: req.body?.name || req.body?.fullName || req.body?.studentName
+        nationalId: /^\d{5,10}$/.test(userIdentifier) ? userIdentifier : req.body?.nationalId
       });
     }
 

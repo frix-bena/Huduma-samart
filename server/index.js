@@ -969,9 +969,9 @@ function buildResponseProfile(scraped = {}, reqBody = {}, userIdentifier = "") {
   const isId = userIdentifier && /^\d{5,10}$/.test(userIdentifier);
   const isEmail = userIdentifier && userIdentifier.includes("@");
 
-  const nationalId = s.nationalId || reqBody.nationalId || (isId ? userIdentifier : null) || "Data not found";
-  const name = s.name || reqBody.name || reqBody.fullName || (nationalId !== "Data not found" ? `HEF Loanee (${nationalId})` : "Data not found");
+  const nationalId = s.nationalId || reqBody.nationalId || (isId ? userIdentifier : null) || "";
   const email = (isEmail ? userIdentifier : reqBody.email) || null;
+  const name = s.name || reqBody.name || (email ? hefEngine.extractNameFromEmail(email) : null) || (nationalId ? `Student (${nationalId})` : "Student");
   const institution = s.institution || reqBody.institution || "Data not found";
   const programme = s.programme || reqBody.programme || "Data not found";
   const level = s.level || reqBody.level || (programme !== "Data not found" && programme.toLowerCase().includes("diploma") ? "TVET" : "Undergraduate");
