@@ -739,6 +739,8 @@ async function performLogin(email, password) {
       S.outstandingBalance = p.funding?.cumulative?.outstandingBalance !== undefined ? p.funding.cumulative.outstandingBalance : null;
       S.loanAwarded = p.funding?.cumulative?.awardedPrincipal !== undefined ? p.funding.cumulative.awardedPrincipal : null;
       S.disbursements = Array.isArray(p.disbursements) ? p.disbursements : [];
+      S.dataIntegrityWarning = !!(res.dataIntegrityWarning || p.dataIntegrityWarning);
+      S.warningDetail = res.warningDetail || p.warningDetail || null;
     } else {
       // Synchronized authentic fallback
       const resolved = resolveClientProfile({
@@ -748,6 +750,8 @@ async function performLogin(email, password) {
       S.auth = true;
       S.sessionToken = `hef-sess-${Date.now().toString(36)}`;
       Object.assign(S, resolved);
+      S.dataIntegrityWarning = !!res?.dataIntegrityWarning;
+      S.warningDetail = res?.warningDetail || null;
     }
 
     updateSessionUI();
@@ -765,6 +769,7 @@ async function performLogin(email, password) {
         <div style="font-size:15px;font-weight:700;margin:4px 0 8px;color:var(--t1);">
           Welcome, <strong>${S.name || S.email}</strong>!
         </div>
+        ${S.dataIntegrityWarning ? `<div style="background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);border-radius:6px;padding:8px 12px;margin:8px 0;font-size:12px;line-height:1.5;color:var(--yellow);">⚠️ <strong>Notice:</strong> Some profile records could not be fully verified from portal DOM: ${S.warningDetail || "Unverified records"}.</div>` : ''}
         <div style="font-size:12.5px;line-height:1.6;color:var(--t2);">
           Your official student financing records are synchronized with the Higher Education Financing portal:
           <ul style="margin:6px 0 8px 18px;color:var(--t1);">

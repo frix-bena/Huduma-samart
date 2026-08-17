@@ -101,85 +101,160 @@ async function captureSnapshot(page, label) {
 }
 
 /**
- * Clean and sanitize scraped text strings
+ * Clean and sanitize scraped text strings.
+ * Discards empty/placeholder text and filters out boilerplate/footer content.
  */
 function sanitizeText(str) {
   if (typeof str !== "string") return null;
   const trimmed = str.replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim();
-  return (trimmed.length > 0 && trimmed !== "-" && trimmed !== "N/A" && trimmed !== "null" && trimmed !== "undefined") ? trimmed : null;
+  if (trimmed.length === 0 || trimmed === "-" || trimmed === "N/A" || trimmed === "null" || trimmed === "undefined") {
+    return null;
+  }
+  if (hefEngine.isBoilerplateText(trimmed)) {
+    return null;
+  }
+  return trimmed;
 }
 
 /**
  * Strict DOM text scraper helper using Playwright locators.
  * Searches for field labels and extracts following sibling, table cell, definition list, or container elements.
+ * 
+ * Includes per-field instrumentation & rejection auditing.
  */
-async function scrapeFieldByLabels(page, labels, fallbackSelectors = []) {
+async function scrapeFieldByLabels(page, fieldName, labels, fallbackSelectors = [], auditReport = null) {
+  let candidateRejected = null;
+
   for (const label of labels) {
+    const lower = label.toLowerCase();
+
+    // 1. Exact Playwright locator with following-sibling: text="Label" >> xpath=following-sibling::*[1]
     try {
-      // 1. Exact Playwright locator with following-sibling: text="Label" >> xpath=following-sibling::*[1]
       const sibLoc = page.locator(`text="${label}" >> xpath=following-sibling::*[1]`).first();
-      if (await sibLoc.isVisible({ timeout: 500 }).catch(() => false)) {
+      if (await sibLoc.isVisible({ timeout: 400 }).catch(() => false)) {
         const raw = await sibLoc.innerText().catch(async () => await sibLoc.textContent().catch(() => ""));
         const clean = sanitizeText(raw);
-        if (clean && clean.toLowerCase() !== label.toLowerCase()) return clean;
+        if (clean && clean.toLowerCase() !== lower) {
+          if (hefEngine.validateField(fieldName, clean)) {
+            if (auditReport) auditReport[fieldName] = { status: "FOUND", strategy: 1, matched: `label: "${label}"`, value: clean };
+            return clean;
+          } else {
+            candidateRejected = { strategy: 1, matched: `label: "${label}"`, rawValue: clean, reason: `Shape check failed for ${fieldName}` };
+          }
+        } else if (raw && hefEngine.isBoilerplateText(raw)) {
+          candidateRejected = { strategy: 1, matched: `label: "${label}"`, rawValue: raw, reason: "Boilerplate/footer text detected" };
+        }
       }
     } catch (_) {}
 
+    // 2. Case-insensitive following-sibling xpath
     try {
-      // 2. Case-insensitive following-sibling xpath
-      const lower = label.toLowerCase();
       const xpathLoc = page.locator(`xpath=//*[translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')="${lower}" or contains(translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]/following-sibling::*[1]`).first();
-      if (await xpathLoc.isVisible({ timeout: 500 }).catch(() => false)) {
+      if (await xpathLoc.isVisible({ timeout: 400 }).catch(() => false)) {
         const raw = await xpathLoc.innerText().catch(async () => await xpathLoc.textContent().catch(() => ""));
         const clean = sanitizeText(raw);
-        if (clean && clean.toLowerCase() !== label.toLowerCase()) return clean;
+        if (clean && clean.toLowerCase() !== lower) {
+          if (hefEngine.validateField(fieldName, clean)) {
+            if (auditReport) auditReport[fieldName] = { status: "FOUND", strategy: 2, matched: `xpath-label: "${label}"`, value: clean };
+            return clean;
+          } else {
+            candidateRejected = { strategy: 2, matched: `xpath-label: "${label}"`, rawValue: clean, reason: `Shape check failed for ${fieldName}` };
+          }
+        } else if (raw && hefEngine.isBoilerplateText(raw)) {
+          candidateRejected = { strategy: 2, matched: `xpath-label: "${label}"`, rawValue: raw, reason: "Boilerplate/footer text detected" };
+        }
       }
     } catch (_) {}
 
+    // 3. Table cell: <td>Label</td><td>Value</td> or <th>Label</th><td>Value</td>
     try {
-      // 3. Table cell: <td>Label</td><td>Value</td> or <th>Label</th><td>Value</td>
-      const lower = label.toLowerCase();
       const tableCellLoc = page.locator(`xpath=//td[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]/following-sibling::td[1] | //th[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]/following-sibling::td[1]`).first();
-      if (await tableCellLoc.isVisible({ timeout: 500 }).catch(() => false)) {
+      if (await tableCellLoc.isVisible({ timeout: 400 }).catch(() => false)) {
         const raw = await tableCellLoc.innerText().catch(async () => await tableCellLoc.textContent().catch(() => ""));
         const clean = sanitizeText(raw);
-        if (clean && clean.toLowerCase() !== label.toLowerCase()) return clean;
+        if (clean && clean.toLowerCase() !== lower) {
+          if (hefEngine.validateField(fieldName, clean)) {
+            if (auditReport) auditReport[fieldName] = { status: "FOUND", strategy: 3, matched: `table-cell: "${label}"`, value: clean };
+            return clean;
+          } else {
+            candidateRejected = { strategy: 3, matched: `table-cell: "${label}"`, rawValue: clean, reason: `Shape check failed for ${fieldName}` };
+          }
+        } else if (raw && hefEngine.isBoilerplateText(raw)) {
+          candidateRejected = { strategy: 3, matched: `table-cell: "${label}"`, rawValue: raw, reason: "Boilerplate/footer text detected" };
+        }
       }
     } catch (_) {}
 
+    // 4. Definition list: <dt>Label</dt><dd>Value</dd>
     try {
-      // 4. Definition list: <dt>Label</dt><dd>Value</dd>
-      const lower = label.toLowerCase();
       const ddLoc = page.locator(`xpath=//dt[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]/following-sibling::dd[1]`).first();
-      if (await ddLoc.isVisible({ timeout: 500 }).catch(() => false)) {
+      if (await ddLoc.isVisible({ timeout: 400 }).catch(() => false)) {
         const raw = await ddLoc.innerText().catch(async () => await ddLoc.textContent().catch(() => ""));
         const clean = sanitizeText(raw);
-        if (clean && clean.toLowerCase() !== label.toLowerCase()) return clean;
+        if (clean && clean.toLowerCase() !== lower) {
+          if (hefEngine.validateField(fieldName, clean)) {
+            if (auditReport) auditReport[fieldName] = { status: "FOUND", strategy: 4, matched: `dl-dd: "${label}"`, value: clean };
+            return clean;
+          } else {
+            candidateRejected = { strategy: 4, matched: `dl-dd: "${label}"`, rawValue: clean, reason: `Shape check failed for ${fieldName}` };
+          }
+        } else if (raw && hefEngine.isBoilerplateText(raw)) {
+          candidateRejected = { strategy: 4, matched: `dl-dd: "${label}"`, rawValue: raw, reason: "Boilerplate/footer text detected" };
+        }
       }
     } catch (_) {}
 
+    // 5. Strictly scoped container (max 3 ancestors above label, NO row/col page-wide containers)
     try {
-      // 5. Labeled card or form-group container with label and value node
-      const lower = label.toLowerCase();
-      const containerLoc = page.locator(`xpath=//*[contains(@class, "form-group") or contains(@class, "detail") or contains(@class, "item") or contains(@class, "row") or contains(@class, "info-box") or contains(@class, "col")][.//*[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]]//*[contains(@class, "value") or contains(@class, "desc") or contains(@class, "text") or contains(@class, "number") or self::b or self::strong or self::span][not(contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}"))]`).first();
-      if (await containerLoc.isVisible({ timeout: 500 }).catch(() => false)) {
+      const containerLoc = page.locator(`xpath=(//*[translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')="${lower}" or contains(translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")][not(self::body or self::html or self::footer or contains(@class, "footer"))]/ancestor::*[position() <= 3 and (contains(@class, "form-group") or contains(@class, "detail") or contains(@class, "item") or contains(@class, "info-box") or contains(@class, "data-field") or contains(@class, "profile-field") or contains(@class, "field"))]//*[contains(@class, "value") or contains(@class, "desc") or contains(@class, "text") or contains(@class, "number") or self::b or self::strong or self::span][not(contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}"))])[1]`).first();
+      if (await containerLoc.isVisible({ timeout: 400 }).catch(() => false)) {
         const raw = await containerLoc.innerText().catch(async () => await containerLoc.textContent().catch(() => ""));
         const clean = sanitizeText(raw);
-        if (clean && clean.toLowerCase() !== label.toLowerCase()) return clean;
+        if (clean && clean.toLowerCase() !== lower) {
+          if (hefEngine.validateField(fieldName, clean)) {
+            if (auditReport) auditReport[fieldName] = { status: "FOUND", strategy: 5, matched: `scoped-container: "${label}"`, value: clean };
+            return clean;
+          } else {
+            candidateRejected = { strategy: 5, matched: `scoped-container: "${label}"`, rawValue: clean, reason: `Shape check failed for ${fieldName}` };
+          }
+        } else if (raw && hefEngine.isBoilerplateText(raw)) {
+          candidateRejected = { strategy: 5, matched: `scoped-container: "${label}"`, rawValue: raw, reason: "Boilerplate/footer text detected" };
+        }
       }
     } catch (_) {}
   }
 
-  // 6. Direct CSS Selectors
+  // 6. Direct CSS Selectors (Supporting both visible text nodes and input element values)
   for (const sel of fallbackSelectors) {
     try {
       const loc = page.locator(sel).first();
-      if (await loc.isVisible({ timeout: 500 }).catch(() => false)) {
-        const raw = await loc.innerText().catch(async () => await loc.textContent().catch(() => ""));
+      if (await loc.isVisible({ timeout: 400 }).catch(() => false) || (sel.includes("input") && await loc.count().catch(() => 0) > 0)) {
+        let raw = "";
+        if (sel.includes("input") || await loc.evaluate(el => el.tagName === "INPUT").catch(() => false)) {
+          raw = await loc.inputValue().catch(async () => await loc.getAttribute("value").catch(() => ""));
+        }
+        if (!raw) {
+          raw = await loc.innerText().catch(async () => await loc.textContent().catch(() => ""));
+        }
         const clean = sanitizeText(raw);
-        if (clean) return clean;
+        if (clean) {
+          if (hefEngine.validateField(fieldName, clean)) {
+            if (auditReport) auditReport[fieldName] = { status: "FOUND", strategy: 6, matched: `selector: "${sel}"`, value: clean };
+            return clean;
+          } else {
+            candidateRejected = { strategy: 6, matched: `selector: "${sel}"`, rawValue: clean, reason: `Shape check failed for ${fieldName}` };
+          }
+        } else if (raw && hefEngine.isBoilerplateText(raw)) {
+          candidateRejected = { strategy: 6, matched: `selector: "${sel}"`, rawValue: raw, reason: "Boilerplate/footer text detected" };
+        }
       }
     } catch (_) {}
+  }
+
+  if (candidateRejected) {
+    if (auditReport) auditReport[fieldName] = { status: "REJECTED", strategy: candidateRejected.strategy, matched: candidateRejected.matched, rawValue: candidateRejected.rawValue, reason: candidateRejected.reason };
+  } else {
+    if (auditReport) auditReport[fieldName] = { status: "NOT_FOUND", strategy: null, matched: null, value: null, reason: "No matching DOM element found" };
   }
 
   return null;
@@ -217,12 +292,18 @@ async function scrapeDashboardFromPage(page) {
   await page.waitForSelector('.dashboard-container, .profile-details, .content-wrapper, .content, .main-content, .card, .card-body, .box, .box-body, #dashboard, .profile, .student-info, .user-panel', { timeout: 10000 }).catch(() => {});
   await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
 
-  // 1. Student Full Name
-  let name = await scrapeFieldByLabels(page,
+  const extractionAudit = {};
+
+  // 1. Student Full Name (Verified from authenticated debug-dashboard.html navbar and hidden fields)
+  let name = await scrapeFieldByLabels(page, "name",
     ["Full Name", "Student Name", "Loanee Name", "Applicant Name", "Name"],
     [
+      ".dropdown-user .user-name b",
+      ".dropdown-user .user-name",
+      "input#unames",
+      "input#names",
+      ".user-name.text-bold-700",
       ".profile-username",
-      ".user-name",
       ".student-name",
       ".profile-name",
       "#student_name",
@@ -233,7 +314,8 @@ async function scrapeDashboardFromPage(page) {
       ".navbar-custom-menu .dropdown-toggle",
       "h3.profile-username",
       ".widget-user-username"
-    ]
+    ],
+    extractionAudit
   );
   if (name) {
     name = name.replace(/^welcome,?\s*/i, "").replace(/^(student|user|hi|hello):?\s*/i, "").trim();
@@ -243,15 +325,17 @@ async function scrapeDashboardFromPage(page) {
   }
 
   // 2. Institution / University
-  const institution = await scrapeFieldByLabels(page,
+  const institution = await scrapeFieldByLabels(page, "institution",
     ["Institution", "University", "College", "Institution Name", "University / College", "Institution of Study", "School"],
-    [".institution-name", "#institution", "#university", ".university-name", "#college", ".college-name"]
+    ["input#institution", ".institution-name", "#institution", "#university", ".university-name", "#college", ".college-name"],
+    extractionAudit
   );
 
   // 3. Allocated Band
-  const allocatedBandRaw = await scrapeFieldByLabels(page,
+  const allocatedBandRaw = await scrapeFieldByLabels(page, "bandAllocated",
     ["Allocated Band", "Funding Band", "Band Allocated", "Current Band", "Assigned Band", "Band"],
-    [".band-allocated", "#allocated_band", ".hef-band", ".band-badge", ".badge-band", "#band"]
+    [".band-allocated", "#allocated_band", ".hef-band", ".band-badge", ".badge-band", "#band"],
+    extractionAudit
   );
   let allocatedBand = allocatedBandRaw;
   let bandNum = null;
@@ -264,117 +348,167 @@ async function scrapeDashboardFromPage(page) {
   }
 
   // 4. Total Outstanding Due / Loan Balance
-  const outstandingDue = await scrapeFieldByLabels(page,
+  const outstandingDue = await scrapeFieldByLabels(page, "outstandingDue",
     ["Total Outstanding", "Outstanding Due", "Loan Balance", "Outstanding Balance", "Current Balance", "Total Loan Due", "Total Due", "Total Outstanding Due"],
-    [".outstanding-balance", "#outstanding_balance", ".total-outstanding", "#total_outstanding", "#loan_balance", ".loan-balance"]
+    [".outstanding-balance", "#outstanding_balance", ".total-outstanding", "#total_outstanding", "#loan_balance", ".loan-balance"],
+    extractionAudit
   );
 
-  // 5. National ID
-  const nationalId = await scrapeFieldByLabels(page,
+  // 5. National ID (Verified from debug-dashboard.html hidden field input#user_id)
+  const nationalId = await scrapeFieldByLabels(page, "nationalId",
     ["National ID", "ID Number", "National ID No", "ID No", "National ID Number", "ID/Passport"],
-    [".national-id", "#national_id", "#id_number", ".id-number", "#id_no", ".id-no"]
+    [
+      "input#user_id",
+      "input[name='user_id']",
+      "input#id_number",
+      "input#id_no",
+      ".national-id",
+      "#national_id",
+      "#id_number",
+      ".id-number",
+      "#id_no",
+      ".id-no"
+    ],
+    extractionAudit
   );
 
   // 6. KCSE Index
-  const kcseIndex = await scrapeFieldByLabels(page,
+  const kcseIndex = await scrapeFieldByLabels(page, "kcseIndex",
     ["KCSE Index", "Index Number", "KCSE Index No", "Index No", "KCSE Index Number", "KCSE No"],
-    [".kcse-index", "#kcse_index", "#index_no", ".index-no", "#kcse_no"]
+    [
+      "input#kcse_index",
+      "input#index_no",
+      ".kcse-index",
+      "#kcse_index",
+      "#index_no",
+      ".index-no",
+      "#kcse_no"
+    ],
+    extractionAudit
   );
 
   // 7. Programme / Course
-  const programme = await scrapeFieldByLabels(page,
+  const programme = await scrapeFieldByLabels(page, "programme",
     ["Programme", "Program", "Course", "Programme of Study", "Program of Study", "Course of Study", "Degree", "Academic Programme"],
-    [".programme-name", "#programme", "#course", ".course-name", "#program", ".program-name"]
+    [
+      "input#programme",
+      ".programme-name",
+      "#programme",
+      "#course",
+      ".course-name",
+      "#program",
+      ".program-name"
+    ],
+    extractionAudit
   );
 
   // 8. Level of Study
-  const level = await scrapeFieldByLabels(page,
+  const level = await scrapeFieldByLabels(page, "level",
     ["Level", "Level of Study", "Study Level", "Programme Level", "Education Level"],
-    [".study-level", "#study_level", ".level-of-study"]
+    [".study-level", "#study_level", ".level-of-study"],
+    extractionAudit
   );
 
   // 9. Year of Study
-  const yearOfStudyRaw = await scrapeFieldByLabels(page,
+  const yearOfStudyRaw = await scrapeFieldByLabels(page, "yearOfStudy",
     ["Year of Study", "Academic Year of Study", "Study Year", "Current Year", "Year"],
-    [".year-of-study", "#year_of_study", "#year"]
+    ["input#study_year", ".year-of-study", "#year_of_study", "#year"],
+    extractionAudit
   );
   let yearOfStudy = null;
   if (yearOfStudyRaw) {
-    const yMatch = yearOfStudyRaw.match(/\b([1-6])\b/);
+    const yMatch = String(yearOfStudyRaw).match(/\b([1-6])\b/);
     if (yMatch) yearOfStudy = parseInt(yMatch[1], 10);
   }
 
   // 10. Semester
-  const currentSemesterRaw = await scrapeFieldByLabels(page,
+  const currentSemesterRaw = await scrapeFieldByLabels(page, "currentSemester",
     ["Semester", "Current Semester", "Study Semester"],
-    [".current-semester", "#current_semester", "#semester"]
+    [".current-semester", "#current_semester", "#semester"],
+    extractionAudit
   );
   let currentSemester = null;
   if (currentSemesterRaw) {
-    const sMatch = currentSemesterRaw.match(/\b([1-3])\b/);
+    const sMatch = String(currentSemesterRaw).match(/\b([1-3])\b/);
     if (sMatch) currentSemester = parseInt(sMatch[1], 10);
   }
 
-  // 11. Academic Year
-  const academicYear = await scrapeFieldByLabels(page,
+  // 11. Academic Year (Verified from debug-dashboard.html input#academic_year)
+  const academicYear = await scrapeFieldByLabels(page, "academicYear",
     ["Academic Year", "Current Academic Year", "Financial Year"],
-    [".academic-year", "#academic_year"]
+    [
+      "input#academic_year",
+      "input[name='academic_year']",
+      ".academic-year",
+      "#academic_year"
+    ],
+    extractionAudit
   );
 
   // 12. Awarded Principal / Total Loan
-  const loanAwarded = await scrapeFieldByLabels(page,
+  const loanAwarded = await scrapeFieldByLabels(page, "loanAwarded",
     ["Awarded Principal", "Total Loan", "Total Loan Awarded", "Loan Awarded", "Allocated Loan", "Total Awarded"],
-    [".loan-awarded", "#loan_awarded", ".allocated-loan", "#allocated_loan"]
+    [".loan-awarded", "#loan_awarded", ".allocated-loan", "#allocated_loan"],
+    extractionAudit
   );
 
   // 13. Scholarship Amount
-  const scholarshipAmount = await scrapeFieldByLabels(page,
+  const scholarshipAmount = await scrapeFieldByLabels(page, "scholarshipAmount",
     ["Scholarship", "Scholarship Awarded", "Total Scholarship", "Allocated Scholarship", "Government Scholarship"],
-    [".scholarship-amount", "#scholarship_amount", ".allocated-scholarship"]
+    [".scholarship-amount", "#scholarship_amount", ".allocated-scholarship"],
+    extractionAudit
   );
 
   // 14. Tuition Loan
-  const tuitionLoan = await scrapeFieldByLabels(page,
+  const tuitionLoan = await scrapeFieldByLabels(page, "tuitionLoan",
     ["Tuition Loan", "Tuition", "Allocated Tuition Loan", "Tuition Portion"],
-    [".tuition-loan", "#tuition_loan"]
+    [".tuition-loan", "#tuition_loan"],
+    extractionAudit
   );
 
   // 15. Upkeep Loan
-  const upkeepLoan = await scrapeFieldByLabels(page,
+  const upkeepLoan = await scrapeFieldByLabels(page, "upkeepLoan",
     ["Upkeep Loan", "Upkeep", "Allocated Upkeep", "Living Allowance", "Upkeep Stipend"],
-    [".upkeep-loan", "#upkeep_loan", ".upkeep-amount", "#upkeep_amount"]
+    [".upkeep-loan", "#upkeep_loan", ".upkeep-amount", "#upkeep_amount"],
+    extractionAudit
   );
 
   // 16. Household Fee
-  const householdFee = await scrapeFieldByLabels(page,
+  const householdFee = await scrapeFieldByLabels(page, "householdFee",
     ["Household Contribution", "Household Fee", "Family Contribution", "Household Portion", "Direct Fee"],
-    [".household-fee", "#household_fee", ".household-contribution"]
+    [".household-fee", "#household_fee", ".household-contribution"],
+    extractionAudit
   );
 
   // 17. Total Repaid
-  const totalRepaid = await scrapeFieldByLabels(page,
+  const totalRepaid = await scrapeFieldByLabels(page, "totalRepaid",
     ["Total Repaid", "Amount Repaid", "Repaid", "Repayment to Date", "Total Payment"],
-    [".total-repaid", "#total_repaid", ".amount-repaid"]
+    [".total-repaid", "#total_repaid", ".amount-repaid"],
+    extractionAudit
   );
 
   // 18. Application Status & Ref
-  const applicationStatus = await scrapeFieldByLabels(page,
+  const applicationStatus = await scrapeFieldByLabels(page, "applicationStatus",
     ["Application Status", "Status", "HEF Status", "Funding Status", "Stage"],
-    [".application-status", "#application_status", ".status-badge", ".badge-status"]
+    [".application-status", "#application_status", ".status-badge", ".badge-status"],
+    extractionAudit
   );
-  const applicationRef = await scrapeFieldByLabels(page,
+  const applicationRef = await scrapeFieldByLabels(page, "applicationRef",
     ["Application Ref", "Application Reference", "Batch Number", "Reference Number", "Ref No", "Application Number"],
-    [".app-ref", "#app_ref", ".batch-number", "#batch_number"]
+    [".app-ref", "#app_ref", ".batch-number", "#batch_number"],
+    extractionAudit
   );
 
   // 19. Bank Name & Account Number
-  const bankName = await scrapeFieldByLabels(page,
+  const bankName = await scrapeFieldByLabels(page, "bankName",
     ["Bank Name", "Bank", "Disbursement Bank", "Upkeep Bank"],
-    [".bank-name", "#bank_name"]
+    ["input#bank_name", ".bank-name", "#bank_name"],
+    extractionAudit
   );
-  const accountNumber = await scrapeFieldByLabels(page,
+  const accountNumber = await scrapeFieldByLabels(page, "accountNumber",
     ["Account Number", "Account No", "Bank Account", "Account"],
-    [".account-number", "#account_number", "#account_no"]
+    ["input#account_number", "input#account_no", ".account-number", "#account_number", "#account_no"],
+    extractionAudit
   );
 
   // 20. Table Rows / Disbursements
@@ -423,8 +557,22 @@ async function scrapeDashboardFromPage(page) {
     upkeepLoan,
     householdFee,
     totalRepaid,
-    disbursements
+    disbursements,
+    extractionAudit
   };
+
+  // Detailed field-by-field extraction instrumentation audit
+  console.log("\n=================== [playwright-scraper] FIELD EXTRACTION AUDIT ===================");
+  for (const [field, audit] of Object.entries(extractionAudit)) {
+    if (audit.status === "FOUND") {
+      console.log(`  ✓ ${field.padEnd(20)}: FOUND [Strategy #${audit.strategy}] (${audit.matched}) => "${audit.value}"`);
+    } else if (audit.status === "REJECTED") {
+      console.log(`  ✗ ${field.padEnd(20)}: REJECTED [Strategy #${audit.strategy}] (${audit.matched}, Raw: "${audit.rawValue}") => Reason: ${audit.reason}`);
+    } else {
+      console.log(`  - ${field.padEnd(20)}: NOT FOUND (${audit.reason || "no DOM match"})`);
+    }
+  }
+  console.log("===================================================================================\n");
 
   console.log("[playwright-scraper] ✅ Scraped authentic DOM variables:", JSON.stringify({
     name: name || "null",
@@ -875,8 +1023,11 @@ async function playwrightHefLogin(email, password) {
       applicationStatus: apiData.applicationStatus || domData.applicationStatus || regexData.applicationStatus || null,
       applicationRef: apiData.applicationRef || domData.applicationRef || regexData.applicationRef || null,
       disbursements: (apiData.disbursements && apiData.disbursements.length > 0) ? apiData.disbursements : (domData.disbursements && domData.disbursements.length > 0 ? domData.disbursements : []),
-      capturedApiData: apiData
+      capturedApiData: apiData,
+      extractionAudit: domData.extractionAudit || {}
     };
+
+    const integrity = hefEngine.evaluateDataIntegrity(scrapedData, domData.extractionAudit);
 
     console.log("[playwright-login] ✅ Deep scraping completed. Final verified attributes:", JSON.stringify({
       name: scrapedData.name || "Data not found",
@@ -884,7 +1035,8 @@ async function playwrightHefLogin(email, password) {
       institution: scrapedData.institution || "Data not found",
       band: scrapedData.band || "Data not found",
       kcseIndex: scrapedData.kcseIndex || "Data not found",
-      outstandingDue: scrapedData.outstandingDue || "Data not found"
+      outstandingDue: scrapedData.outstandingDue || "Data not found",
+      dataIntegrityWarning: integrity.dataIntegrityWarning
     }));
 
     return {
@@ -893,6 +1045,9 @@ async function playwrightHefLogin(email, password) {
       message: "Login successful.",
       sessionToken: sessionCookie?.value || "portal-session-authenticated",
       pageTitle: pageTitle || "HEF Portal Dashboard",
+      dataIntegrityWarning: integrity.dataIntegrityWarning,
+      warningDetail: integrity.warningDetail,
+      integrity,
       scrapedData
     };
 
@@ -1015,7 +1170,8 @@ function buildResponseProfile(scraped = {}, reqBody = {}, userIdentifier = "") {
     totalRepaid,
     disbursements,
     applicationStatus: s.applicationStatus || reqBody.applicationStatus,
-    applicationRef: s.applicationRef || reqBody.applicationRef
+    applicationRef: s.applicationRef || reqBody.applicationRef,
+    auditDetails: s.extractionAudit
   });
 }
 
@@ -1056,6 +1212,8 @@ app.post("/api/helb/login", async (req, res) => {
     // Construct profile strictly from actual scraped DOM data
     const profile = buildResponseProfile(result.scrapedData, req.body, userIdentifier);
     result.profile = profile;
+    result.dataIntegrityWarning = profile.dataIntegrityWarning !== undefined ? profile.dataIntegrityWarning : (result.dataIntegrityWarning || false);
+    result.warningDetail = profile.warningDetail || result.warningDetail || null;
 
     // Store verified session
     const sessionToken = result.sessionToken || `hef-sess-${Date.now().toString(36)}`;
@@ -1077,6 +1235,8 @@ app.post("/api/helb/login", async (req, res) => {
       success: true,
       message: "Login successful (HEF Portal Session Established).",
       sessionToken,
+      dataIntegrityWarning: profile.dataIntegrityWarning || false,
+      warningDetail: profile.warningDetail || null,
       profile,
       scrapedData: result.scrapedData || null
     });

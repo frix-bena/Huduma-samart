@@ -191,6 +191,8 @@ module.exports = async (req, res) => {
     if (result.ok) {
       return res.status(200).json({
         ...result,
+        dataIntegrityWarning: profile?.dataIntegrityWarning || false,
+        warningDetail: profile?.warningDetail || null,
         profile
       });
     }
@@ -206,6 +208,8 @@ module.exports = async (req, res) => {
       success: true,
       sessionToken: `hef-sess-${Date.now().toString(36)}`,
       message: "Login successful (HEF Portal Session Established).",
+      dataIntegrityWarning: profile?.dataIntegrityWarning || false,
+      warningDetail: profile?.warningDetail || null,
       profile
     });
   } catch (err) {

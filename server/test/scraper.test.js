@@ -1,0 +1,394 @@
+const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
+const { chromium } = require("playwright");
+const hefEngine = require("../hefEngine");
+
+// Scraper functions from index.js (or re-implemented matching index.js for unit testing)
+function sanitizeText(str) {
+  if (typeof str !== "string") return null;
+  const trimmed = str.replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim();
+  if (trimmed.length === 0 || trimmed === "-" || trimmed === "N/A" || trimmed === "null" || trimmed === "undefined") {
+    return null;
+  }
+  if (hefEngine.isBoilerplateText(trimmed)) {
+    return null;
+  }
+  return trimmed;
+}
+
+async function scrapeFieldByLabels(page, fieldName, labels, fallbackSelectors = [], auditReport = null) {
+  let candidateRejected = null;
+
+  for (const label of labels) {
+    const lower = label.toLowerCase();
+
+    // 1. Exact Playwright locator with following-sibling
+    try {
+      const sibLoc = page.locator(`text="${label}" >> xpath=following-sibling::*[1]`).first();
+      if (await sibLoc.isVisible({ timeout: 300 }).catch(() => false)) {
+        const raw = await sibLoc.innerText().catch(async () => await sibLoc.textContent().catch(() => ""));
+        const clean = sanitizeText(raw);
+        if (clean && clean.toLowerCase() !== lower) {
+          if (hefEngine.validateField(fieldName, clean)) {
+            if (auditReport) auditReport[fieldName] = { status: "FOUND", strategy: 1, matched: `label: "${label}"`, value: clean };
+            return clean;
+          } else {
+            candidateRejected = { strategy: 1, matched: `label: "${label}"`, rawValue: clean, reason: `Shape check failed for ${fieldName}` };
+          }
+        } else if (raw && hefEngine.isBoilerplateText(raw)) {
+          candidateRejected = { strategy: 1, matched: `label: "${label}"`, rawValue: raw, reason: "Boilerplate/footer text detected" };
+        }
+      }
+    } catch (_) {}
+
+    // 2. Case-insensitive following-sibling xpath
+    try {
+      const xpathLoc = page.locator(`xpath=//*[translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')="${lower}" or contains(translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]/following-sibling::*[1]`).first();
+      if (await xpathLoc.isVisible({ timeout: 300 }).catch(() => false)) {
+        const raw = await xpathLoc.innerText().catch(async () => await xpathLoc.textContent().catch(() => ""));
+        const clean = sanitizeText(raw);
+        if (clean && clean.toLowerCase() !== lower) {
+          if (hefEngine.validateField(fieldName, clean)) {
+            if (auditReport) auditReport[fieldName] = { status: "FOUND", strategy: 2, matched: `xpath-label: "${label}"`, value: clean };
+            return clean;
+          } else {
+            candidateRejected = { strategy: 2, matched: `xpath-label: "${label}"`, rawValue: clean, reason: `Shape check failed for ${fieldName}` };
+          }
+        } else if (raw && hefEngine.isBoilerplateText(raw)) {
+          candidateRejected = { strategy: 2, matched: `xpath-label: "${label}"`, rawValue: raw, reason: "Boilerplate/footer text detected" };
+        }
+      }
+    } catch (_) {}
+
+    // 3. Table cell
+    try {
+      const tableCellLoc = page.locator(`xpath=//td[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]/following-sibling::td[1] | //th[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]/following-sibling::td[1]`).first();
+      if (await tableCellLoc.isVisible({ timeout: 300 }).catch(() => false)) {
+        const raw = await tableCellLoc.innerText().catch(async () => await tableCellLoc.textContent().catch(() => ""));
+        const clean = sanitizeText(raw);
+        if (clean && clean.toLowerCase() !== lower) {
+          if (hefEngine.validateField(fieldName, clean)) {
+            if (auditReport) auditReport[fieldName] = { status: "FOUND", strategy: 3, matched: `table-cell: "${label}"`, value: clean };
+            return clean;
+          } else {
+            candidateRejected = { strategy: 3, matched: `table-cell: "${label}"`, rawValue: clean, reason: `Shape check failed for ${fieldName}` };
+          }
+        } else if (raw && hefEngine.isBoilerplateText(raw)) {
+          candidateRejected = { strategy: 3, matched: `table-cell: "${label}"`, rawValue: raw, reason: "Boilerplate/footer text detected" };
+        }
+      }
+    } catch (_) {}
+
+    // 4. Definition list
+    try {
+      const ddLoc = page.locator(`xpath=//dt[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]/following-sibling::dd[1]`).first();
+      if (await ddLoc.isVisible({ timeout: 300 }).catch(() => false)) {
+        const raw = await ddLoc.innerText().catch(async () => await ddLoc.textContent().catch(() => ""));
+        const clean = sanitizeText(raw);
+        if (clean && clean.toLowerCase() !== lower) {
+          if (hefEngine.validateField(fieldName, clean)) {
+            if (auditReport) auditReport[fieldName] = { status: "FOUND", strategy: 4, matched: `dl-dd: "${label}"`, value: clean };
+            return clean;
+          } else {
+            candidateRejected = { strategy: 4, matched: `dl-dd: "${label}"`, rawValue: clean, reason: `Shape check failed for ${fieldName}` };
+          }
+        } else if (raw && hefEngine.isBoilerplateText(raw)) {
+          candidateRejected = { strategy: 4, matched: `dl-dd: "${label}"`, rawValue: raw, reason: "Boilerplate/footer text detected" };
+        }
+      }
+    } catch (_) {}
+
+    // 5. Strictly scoped container (position() <= 3, NO row/col page-wide containers)
+    try {
+      const containerLoc = page.locator(`xpath=(//*[translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')="${lower}" or contains(translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")][not(self::body or self::html or self::footer or contains(@class, "footer"))]/ancestor::*[position() <= 3 and (contains(@class, "form-group") or contains(@class, "detail") or contains(@class, "item") or contains(@class, "info-box") or contains(@class, "data-field") or contains(@class, "profile-field") or contains(@class, "field"))]//*[contains(@class, "value") or contains(@class, "desc") or contains(@class, "text") or contains(@class, "number") or self::b or self::strong or self::span][not(contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}"))])[1]`).first();
+      if (await containerLoc.isVisible({ timeout: 300 }).catch(() => false)) {
+        const raw = await containerLoc.innerText().catch(async () => await containerLoc.textContent().catch(() => ""));
+        const clean = sanitizeText(raw);
+        if (clean && clean.toLowerCase() !== lower) {
+          if (hefEngine.validateField(fieldName, clean)) {
+            if (auditReport) auditReport[fieldName] = { status: "FOUND", strategy: 5, matched: `scoped-container: "${label}"`, value: clean };
+            return clean;
+          } else {
+            candidateRejected = { strategy: 5, matched: `scoped-container: "${label}"`, rawValue: clean, reason: `Shape check failed for ${fieldName}` };
+          }
+        } else if (raw && hefEngine.isBoilerplateText(raw)) {
+          candidateRejected = { strategy: 5, matched: `scoped-container: "${label}"`, rawValue: raw, reason: "Boilerplate/footer text detected" };
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 6. Direct CSS Selectors
+  for (const sel of fallbackSelectors) {
+    try {
+      const loc = page.locator(sel).first();
+      if (await loc.isVisible({ timeout: 300 }).catch(() => false) || (sel.includes("input") && await loc.count().catch(() => 0) > 0)) {
+        let raw = "";
+        if (sel.includes("input") || await loc.evaluate(el => el.tagName === "INPUT").catch(() => false)) {
+          raw = await loc.inputValue().catch(async () => await loc.getAttribute("value").catch(() => ""));
+        }
+        if (!raw) {
+          raw = await loc.innerText().catch(async () => await loc.textContent().catch(() => ""));
+        }
+        const clean = sanitizeText(raw);
+        if (clean) {
+          if (hefEngine.validateField(fieldName, clean)) {
+            if (auditReport) auditReport[fieldName] = { status: "FOUND", strategy: 6, matched: `selector: "${sel}"`, value: clean };
+            return clean;
+          } else {
+            candidateRejected = { strategy: 6, matched: `selector: "${sel}"`, rawValue: clean, reason: `Shape check failed for ${fieldName}` };
+          }
+        } else if (raw && hefEngine.isBoilerplateText(raw)) {
+          candidateRejected = { strategy: 6, matched: `selector: "${sel}"`, rawValue: raw, reason: "Boilerplate/footer text detected" };
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (candidateRejected) {
+    if (auditReport) auditReport[fieldName] = { status: "REJECTED", strategy: candidateRejected.strategy, matched: candidateRejected.matched, rawValue: candidateRejected.rawValue, reason: candidateRejected.reason };
+  } else {
+    if (auditReport) auditReport[fieldName] = { status: "NOT_FOUND", strategy: null, matched: null, value: null, reason: "No matching DOM element found" };
+  }
+
+  return null;
+}
+
+async function runTests() {
+  console.log("===============================================================================");
+  console.log(" RUNNING HELB / HEF DATA INTEGRITY & SCRAPER TEST SUITE");
+  console.log("===============================================================================\n");
+
+  let passed = 0;
+  let failed = 0;
+
+  function test(name, fn) {
+    try {
+      fn();
+      console.log(`  ✅ PASS: ${name}`);
+      passed++;
+    } catch (err) {
+      console.error(`  ❌ FAIL: ${name}`);
+      console.error(`     Error: ${err.message}`);
+      failed++;
+    }
+  }
+
+  async function asyncTest(name, fn) {
+    try {
+      await fn();
+      console.log(`  ✅ PASS: ${name}`);
+      passed++;
+    } catch (err) {
+      console.error(`  ❌ FAIL: ${name}`);
+      console.error(`     Error: ${err.message}`);
+      failed++;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // TEST GROUP 1: Boilerplate Blocklist
+  // ─────────────────────────────────────────────────────────────────────────
+  console.log("--- Test Group 1: Boilerplate Blocklist Filter ---");
+
+  test("Identifies and rejects standard copyright / powered-by footer strings", () => {
+    assert.strictEqual(hefEngine.isBoilerplateText("Copyright © 2026 HELB, All rights reserved. Powered By: HELB ICT Team"), true);
+    assert.strictEqual(hefEngine.isBoilerplateText("© 2026 Higher Education Financing. All rights reserved."), true);
+    assert.strictEqual(hefEngine.isBoilerplateText("Powered By: HELB ICT Team"), true);
+    assert.strictEqual(hefEngine.isBoilerplateText("HELB ICT Team"), true);
+    assert.strictEqual(hefEngine.isBoilerplateText("All rights reserved"), true);
+    assert.strictEqual(hefEngine.isBoilerplateText("Disclaimer: This portal is for official use only"), true);
+    assert.strictEqual(hefEngine.isBoilerplateText("Terms and conditions apply"), true);
+  });
+
+  test("Allows authentic student profile data through", () => {
+    assert.strictEqual(hefEngine.isBoilerplateText("BERNARD GICHUKI"), false);
+    assert.strictEqual(hefEngine.isBoilerplateText("40064257"), false);
+    assert.strictEqual(hefEngine.isBoilerplateText("12345678901/2022"), false);
+    assert.strictEqual(hefEngine.isBoilerplateText("University of Nairobi"), false);
+    assert.strictEqual(hefEngine.isBoilerplateText("Bachelor of Science (Computer Science)"), false);
+    assert.strictEqual(hefEngine.isBoilerplateText("Band 3"), false);
+    assert.strictEqual(hefEngine.isBoilerplateText("KES 45,000"), false);
+    assert.strictEqual(hefEngine.isBoilerplateText("2026/2027"), false);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // TEST GROUP 2: Shape & Type Validation
+  // ─────────────────────────────────────────────────────────────────────────
+  console.log("\n--- Test Group 2: Centralized Shape Validators ---");
+
+  test("National ID shape validator accepts valid IDs and rejects boilerplate/invalid strings", () => {
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.nationalId("40064257"), true);
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.nationalId("12345678"), true);
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.nationalId("Copyright © 2026 HELB"), false);
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.nationalId("abc123"), false);
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.nationalId("12"), false);
+  });
+
+  test("KCSE Index shape validator accepts 11-digit format and rejects invalid formats", () => {
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.kcseIndex("12345678901/2022"), true);
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.kcseIndex("12345678901"), true);
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.kcseIndex("Powered By: HELB ICT Team"), false);
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.kcseIndex("1234"), false);
+  });
+
+  test("Band shape validator accepts Band 1-5 and rejects invalid ranges or footer text", () => {
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.bandAllocated("Band 1"), true);
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.bandAllocated("Band 5"), true);
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.bandAllocated("3"), true);
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.bandAllocated("Band 8"), false);
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.bandAllocated("Copyright © 2026"), false);
+  });
+
+  test("Academic Year validator accepts 20XX/20YY format and rejects arbitrary text", () => {
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.academicYear("2026/2027"), true);
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.academicYear("2024-2025"), true);
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.academicYear("2026"), false);
+    assert.strictEqual(hefEngine.FIELD_VALIDATORS.academicYear("Copyright © 2026 HELB"), false);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // TEST GROUP 3: resolveHefProfile & evaluateDataIntegrity
+  // ─────────────────────────────────────────────────────────────────────────
+  console.log("\n--- Test Group 3: resolveHefProfile & evaluateDataIntegrity ---");
+
+  test("resolveHefProfile replaces boilerplate fields with 'Data not found'", () => {
+    const profile = hefEngine.resolveHefProfile({
+      name: "BERNARD GICHUKI",
+      nationalId: "40064257",
+      institution: "Copyright © 2026 HELB, All rights reserved.", // Corrupted field
+      programme: "Powered By: HELB ICT Team",                    // Corrupted field
+      band: "Band 3",
+      academicYear: "2026/2027"
+    });
+
+    assert.strictEqual(profile.student.name, "BERNARD GICHUKI");
+    assert.strictEqual(profile.student.nationalId, "40064257");
+    assert.strictEqual(profile.student.institution, "Data not found");
+    assert.strictEqual(profile.student.programme, "Data not found");
+    assert.strictEqual(profile.student.academicYear, "2026/2027");
+  });
+
+  test("evaluateDataIntegrity raises dataIntegrityWarning when > 3 fields are unverified or rejected", () => {
+    const rawData = {
+      name: "BERNARD GICHUKI",
+      nationalId: "40064257",
+      academicYear: "2026/2027"
+      // institution, programme, kcseIndex, band all missing -> 4 unverified
+    };
+
+    const integrity = hefEngine.evaluateDataIntegrity(rawData, {
+      institution: { status: "REJECTED", reason: "Boilerplate/footer text detected", rawValue: "Copyright © 2026" }
+    });
+
+    assert.strictEqual(integrity.dataIntegrityWarning, true);
+    assert.ok(/rejected by integrity guardrails|unverified/i.test(integrity.warningDetail));
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // TEST GROUP 4: Playwright DOM Scraper Isolation Tests
+  // ─────────────────────────────────────────────────────────────────────────
+  console.log("\n--- Test Group 4: Playwright DOM Scraper Isolation & Rejection ---");
+
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+
+  await asyncTest("Strategy 5 never matches page-wide row/col containers or footer text", async () => {
+    // Synthetic HTML that mimics the exact bug scenario:
+    // A form group with a label, but no direct value sibling, inside a large container with a footer
+    const testHtml = `
+      <!DOCTYPE html>
+      <html>
+        <body>
+          <div class="row main-wrapper">
+            <div class="col-md-6 form-group">
+              <label class="control-label">Institution</label>
+              <!-- Value is missing on this sub-page -->
+            </div>
+            <div class="col-md-12 footer">
+              <p class="text-muted">Copyright © 2026 HELB, All rights reserved. Powered By: HELB ICT Team</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    await page.setContent(testHtml);
+    const auditReport = {};
+    const extracted = await scrapeFieldByLabels(page, "institution", ["Institution"], [], auditReport);
+
+    assert.strictEqual(extracted, null, "Extracted value must be null (never footer text)");
+    assert.strictEqual(auditReport.institution.status, "NOT_FOUND");
+    assert.notStrictEqual(extracted, "Copyright © 2026 HELB, All rights reserved. Powered By: HELB ICT Team");
+  });
+
+  await asyncTest("Strategy 6 extracts verified real fields from hidden input tags", async () => {
+    const testHtml = `
+      <!DOCTYPE html>
+      <html>
+        <body>
+          <input type="hidden" id="user_id" name="user_id" value="40064257" />
+          <input type="hidden" id="academic_year" name="academic_year" value="2026/2027" />
+          <div class="dropdown-user">
+            <span class="user-name"><b>BERNARD GICHUKI</b></span>
+          </div>
+        </body>
+      </html>
+    `;
+
+    await page.setContent(testHtml);
+    const auditReport = {};
+
+    const name = await scrapeFieldByLabels(page, "name", ["Full Name", "Name"], [".dropdown-user .user-name b"], auditReport);
+    const nationalId = await scrapeFieldByLabels(page, "nationalId", ["National ID"], ["input#user_id"], auditReport);
+    const academicYear = await scrapeFieldByLabels(page, "academicYear", ["Academic Year"], ["input#academic_year"], auditReport);
+
+    assert.strictEqual(name, "BERNARD GICHUKI");
+    assert.strictEqual(nationalId, "40064257");
+    assert.strictEqual(academicYear, "2026/2027");
+    assert.strictEqual(auditReport.name.status, "FOUND");
+    assert.strictEqual(auditReport.nationalId.status, "FOUND");
+  });
+
+  await asyncTest("debug-dashboard.html snapshot extracts authentic attributes without footer leakage", async () => {
+    const htmlPath = path.resolve(__dirname, "../../debug-dashboard.html");
+    if (fs.existsSync(htmlPath)) {
+      const htmlContent = fs.readFileSync(htmlPath, "utf-8");
+      await page.setContent(htmlContent);
+
+      const auditReport = {};
+      const name = await scrapeFieldByLabels(page, "name", ["Full Name", "Name"], [".dropdown-user .user-name b", "input#unames"], auditReport);
+      const nationalId = await scrapeFieldByLabels(page, "nationalId", ["National ID"], ["input#user_id"], auditReport);
+      const academicYear = await scrapeFieldByLabels(page, "academicYear", ["Academic Year"], ["input#academic_year"], auditReport);
+      const institution = await scrapeFieldByLabels(page, "institution", ["Institution"], ["input#institution", ".institution-name"], auditReport);
+
+      assert.strictEqual(name, "BERNARD GICHUKI");
+      assert.strictEqual(nationalId, "40064257");
+      assert.strictEqual(academicYear, "2026/2027");
+      // On the initial landing page before navigating to profile/loans sub-routes, institution is missing from DOM
+      // It must strictly be null / Data not found, NEVER footer copyright text
+      assert.strictEqual(institution, null);
+      assert.notStrictEqual(institution, "Copyright © 2026 HELB, All rights reserved. Powered By: HELB ICT Team");
+    }
+  });
+
+  await browser.close();
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SUMMARY
+  // ─────────────────────────────────────────────────────────────────────────
+  console.log("\n===============================================================================");
+  console.log(` TEST RUN COMPLETE: ${passed} PASSED, ${failed} FAILED`);
+  console.log("===============================================================================");
+
+  if (failed > 0) {
+    process.exit(1);
+  }
+}
+
+runTests().catch(err => {
+  console.error("Test execution failed:", err);
+  process.exit(1);
+});

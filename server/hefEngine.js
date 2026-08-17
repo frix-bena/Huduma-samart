@@ -115,13 +115,169 @@ const HEF_BANDS = {
 };
 
 /**
+ * Boilerplate / Footer Blocklist Filter
+ * Identifies copyright notices, footer text, website boilerplate, and non-data strings.
+ * Case-insensitive match for: copyright, all rights reserved, powered by, ©, disclaimer, etc.
+ */
+function isBoilerplateText(str) {
+  if (str === null || str === undefined) return false;
+  if (typeof str !== "string" && typeof str !== "number") return false;
+  const s = String(str).trim();
+  if (!s) return false;
+  const boilerplateRegex = /(?:copyright|all\s*rights\s*reserved|powered\s*by|©|&#169;|&copy;|helb\s*ict\s*team|higher\s*education\s*loans\s*board\s*all\s*rights|disclaimer|terms\s*(?:and|&)\s*conditions|privacy\s*policy|designed\s*and\s*developed\s*by)/i;
+  return boilerplateRegex.test(s);
+}
+
+/**
+ * Centralized field shape validators to ensure extracted data matches expected formats
+ */
+const FIELD_VALIDATORS = {
+  nationalId: (val) => {
+    if (val === null || val === undefined) return false;
+    const str = String(val).trim();
+    return /^\d{5,10}$/.test(str) && !isBoilerplateText(str);
+  },
+  kcseIndex: (val) => {
+    if (!val || typeof val !== "string") return false;
+    const str = val.trim();
+    return /^\d{11}(\/\d{4})?$/.test(str) && !isBoilerplateText(str);
+  },
+  accountNumber: (val) => {
+    if (!val || (typeof val !== "string" && typeof val !== "number")) return false;
+    const str = String(val).trim();
+    return /^[\d\-]{4,20}$/.test(str) && !isBoilerplateText(str);
+  },
+  bandAllocated: (val) => {
+    if (!val || (typeof val !== "string" && typeof val !== "number")) return false;
+    const str = String(val).trim();
+    return /^(?:Band\s*)?[1-5]$/i.test(str) && !isBoilerplateText(str);
+  },
+  band: (val) => {
+    if (typeof val === "number") return Number.isInteger(val) && val >= 1 && val <= 5;
+    if (typeof val === "string") {
+      const str = val.trim();
+      return (/^[1-5]$/.test(str) || /^Band\s*[1-5]$/i.test(str)) && !isBoilerplateText(str);
+    }
+    return false;
+  },
+  yearOfStudy: (val) => {
+    if (val === null || val === undefined) return false;
+    const num = typeof val === "number" ? val : parseInt(String(val).trim(), 10);
+    return Number.isInteger(num) && num >= 1 && num <= 6;
+  },
+  currentSemester: (val) => {
+    if (val === null || val === undefined) return false;
+    const num = typeof val === "number" ? val : parseInt(String(val).trim(), 10);
+    return Number.isInteger(num) && num >= 1 && num <= 3;
+  },
+  academicYear: (val) => {
+    if (!val || typeof val !== "string") return false;
+    return /^20\d{2}[\/\-]20\d{2}$/.test(val.trim()) && !isBoilerplateText(val);
+  },
+  name: (val) => {
+    if (!val || typeof val !== "string") return false;
+    const str = val.trim();
+    return str.length >= 2 && str.length <= 100 && !isBoilerplateText(str) && !/^(dashboard|sign\s*out|logout|profile|menu|null|undefined)$/i.test(str);
+  },
+  institution: (val) => {
+    if (!val || typeof val !== "string") return false;
+    const str = val.trim();
+    return str.length >= 3 && !isBoilerplateText(str) && !/^(dashboard|sign\s*out|logout|profile|menu|null|undefined)$/i.test(str);
+  },
+  programme: (val) => {
+    if (!val || typeof val !== "string") return false;
+    const str = val.trim();
+    return str.length >= 3 && !isBoilerplateText(str) && !/^(dashboard|sign\s*out|logout|profile|menu|null|undefined)$/i.test(str);
+  }
+};
+
+/**
+ * Validate a field value against its registered validator and boilerplate filter
+ */
+function validateField(fieldName, value) {
+  if (value === null || value === undefined || value === "") return false;
+  if (isBoilerplateText(String(value))) return false;
+  const validator = FIELD_VALIDATORS[fieldName];
+  if (!validator) return true;
+  return validator(value);
+}
+
+const INTEGRITY_UNVERIFIED_THRESHOLD = 3;
+
+/**
+ * Evaluates scraped / resolved data integrity.
+ * Triggers warning if rejected fields exist or if more than threshold unverified fields are detected.
+ */
+function evaluateDataIntegrity(profileData = {}, auditDetails = {}) {
+  const rejected = [];
+  const unverified = [];
+
+  const coreFields = [
+    { key: "nationalId", label: "National ID", getValue: (d) => d.student?.nationalId || d.nationalId },
+    { key: "kcseIndex", label: "KCSE Index", getValue: (d) => d.student?.kcseIndex || d.kcseIndex },
+    { key: "institution", label: "Institution", getValue: (d) => d.student?.institution || d.institution },
+    { key: "programme", label: "Programme", getValue: (d) => d.student?.programme || d.programme },
+    { key: "bandAllocated", label: "Band Allocation", getValue: (d) => d.funding?.bandName || d.bandAllocated || d.band },
+    { key: "accountNumber", label: "Disbursement Account", getValue: (d) => d.student?.accountNumber || d.accountNumber },
+    { key: "academicYear", label: "Academic Year", getValue: (d) => d.student?.academicYear || d.academicYear }
+  ];
+
+  if (auditDetails && typeof auditDetails === "object") {
+    for (const [field, info] of Object.entries(auditDetails)) {
+      if (info && info.status === "REJECTED") {
+        rejected.push({
+          field,
+          reason: info.reason || "Validation rejected",
+          rawValue: info.rawValue
+        });
+      }
+    }
+  }
+
+  for (const item of coreFields) {
+    const val = item.getValue ? item.getValue(profileData) : (profileData[item.key] || profileData.student?.[item.key]);
+    if (!val || val === "Data not found" || val === null || val === undefined) {
+      unverified.push(item.label || item.key);
+    } else if (isBoilerplateText(String(val))) {
+      rejected.push({ field: item.key, reason: "Contains boilerplate text", rawValue: val });
+    } else if (FIELD_VALIDATORS[item.key] && !FIELD_VALIDATORS[item.key](val)) {
+      rejected.push({ field: item.key, reason: "Shape mismatch", rawValue: val });
+    }
+  }
+
+  const isWarning = rejected.length > 0 || unverified.length > INTEGRITY_UNVERIFIED_THRESHOLD;
+  let warningDetail = null;
+
+  if (isWarning) {
+    const parts = [];
+    if (rejected.length > 0) {
+      parts.push(`Rejected by integrity guardrails: ${rejected.map(r => `${r.field} (${r.reason})`).join(", ")}`);
+    }
+    if (unverified.length > INTEGRITY_UNVERIFIED_THRESHOLD) {
+      parts.push(`Unverified fields (${unverified.length}): ${unverified.join(", ")}`);
+    }
+    warningDetail = parts.join(". ");
+  }
+
+  return {
+    dataIntegrityWarning: isWarning,
+    warningDetail,
+    rejectedCount: rejected.length,
+    unverifiedCount: unverified.length,
+    rejectedFields: rejected,
+    unverifiedFields: unverified
+  };
+}
+
+/**
  * Helper to clean and format a human readable name from an email address if needed
  */
 function extractNameFromEmail(email) {
   if (!email || typeof email !== "string" || !email.includes("@")) return "";
   const prefix = email.split("@")[0].replace(/[0-9._+-]+/g, " ").trim();
   if (!prefix) return "";
-  return prefix.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+  const clean = prefix.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+  return isBoilerplateText(clean) ? "" : clean;
 }
 
 /**
@@ -130,35 +286,70 @@ function extractNameFromEmail(email) {
  */
 function resolveHefProfile(input = {}) {
   // Extract student name strictly without mock generation
-  let name = (input.name || input.fullName || input.studentName || "").trim();
-  if (!name && input.credential && !input.credential.includes("@") && isNaN(input.credential) && input.credential.length > 2) {
+  let rawName = (input.name || input.fullName || input.studentName || "").trim();
+  let name = "";
+  if (rawName && !isBoilerplateText(rawName) && FIELD_VALIDATORS.name(rawName)) {
+    name = rawName;
+  } else if (input.credential && !input.credential.includes("@") && isNaN(input.credential) && input.credential.length > 2 && !isBoilerplateText(input.credential)) {
     name = input.credential.trim();
-  } else if (!name && input.email && input.email.includes("@")) {
+  } else if (input.email && input.email.includes("@")) {
     const emailName = extractNameFromEmail(input.email);
     if (emailName && emailName.length > 2) name = emailName;
   }
-  if (!name) {
-    name = input.nationalId ? `HEF Loanee (${input.nationalId})` : "Data not found";
+
+  // National ID validation
+  let nationalId = "Data not found";
+  const rawId = input.nationalId || (input.credential && /^\d{5,10}$/.test(input.credential) ? input.credential : null);
+  if (rawId && FIELD_VALIDATORS.nationalId(rawId)) {
+    nationalId = String(rawId).trim();
   }
 
-  // National ID
-  const nationalId = (input.nationalId || (input.credential && /^\d{5,10}$/.test(input.credential) ? input.credential : null)) || "Data not found";
-  const email = input.email || (input.credential && input.credential.includes("@") ? input.credential : null);
-  const phone = input.phone || null;
-  const kcseIndex = input.kcseIndex || "Data not found";
+  if (!name) {
+    name = nationalId !== "Data not found" ? `HEF Loanee (${nationalId})` : "Data not found";
+  }
 
-  // Institution & Programme
-  const institution = input.institution || "Data not found";
-  const programme = input.programme || "Data not found";
-  const level = input.level || (programme !== "Data not found" && programme.toLowerCase().includes("diploma") ? "TVET" : "Undergraduate");
+  const email = (input.email && !isBoilerplateText(input.email)) ? input.email : (input.credential && input.credential.includes("@") ? input.credential : null);
+  const phone = (input.phone && !isBoilerplateText(input.phone)) ? input.phone : null;
 
-  const yearOfStudy = input.yearOfStudy ? parseInt(input.yearOfStudy, 10) : null;
-  const currentSemester = input.currentSemester ? parseInt(input.currentSemester, 10) : null;
-  const academicYear = input.academicYear || "Data not found";
+  // KCSE Index validation
+  let kcseIndex = "Data not found";
+  if (input.kcseIndex && FIELD_VALIDATORS.kcseIndex(input.kcseIndex)) {
+    kcseIndex = input.kcseIndex.trim();
+  }
 
-  // Bank details
-  const bankName = input.bankName || "Data not found";
-  const accountNumber = input.accountNumber || "Data not found";
+  // Institution & Programme validation
+  let institution = "Data not found";
+  if (input.institution && FIELD_VALIDATORS.institution(input.institution)) {
+    institution = input.institution.trim();
+  }
+
+  let programme = "Data not found";
+  if (input.programme && FIELD_VALIDATORS.programme(input.programme)) {
+    programme = input.programme.trim();
+  }
+
+  const level = input.level && !isBoilerplateText(input.level)
+    ? input.level
+    : (programme !== "Data not found" && programme.toLowerCase().includes("diploma") ? "TVET" : "Undergraduate");
+
+  const yearOfStudy = FIELD_VALIDATORS.yearOfStudy(input.yearOfStudy) ? parseInt(input.yearOfStudy, 10) : null;
+  const currentSemester = FIELD_VALIDATORS.currentSemester(input.currentSemester) ? parseInt(input.currentSemester, 10) : null;
+  
+  let academicYear = "Data not found";
+  if (input.academicYear && FIELD_VALIDATORS.academicYear(input.academicYear)) {
+    academicYear = input.academicYear.trim();
+  }
+
+  // Bank details validation
+  let bankName = "Data not found";
+  if (input.bankName && !isBoilerplateText(input.bankName) && input.bankName !== "Data not found") {
+    bankName = input.bankName.trim();
+  }
+
+  let accountNumber = "Data not found";
+  if (input.accountNumber && FIELD_VALIDATORS.accountNumber(input.accountNumber)) {
+    accountNumber = String(input.accountNumber).trim();
+  }
 
   // Band resolution: strictly extract from input without guessing random numbers
   let bandNum = null;
@@ -240,7 +431,7 @@ function resolveHefProfile(input = {}) {
       : (outstandingBalance ? `Active loan balance of ${outstandingBalance} is currently outstanding.` : "Data not found")
   };
 
-  return {
+  const resolvedProfile = {
     student: {
       name,
       nationalId,
@@ -301,6 +492,13 @@ function resolveHefProfile(input = {}) {
     appStatus,
     clearance
   };
+
+  const integrity = evaluateDataIntegrity(resolvedProfile, input.auditDetails);
+  resolvedProfile.dataIntegrityWarning = integrity.dataIntegrityWarning;
+  resolvedProfile.warningDetail = integrity.warningDetail;
+  resolvedProfile.integrity = integrity;
+
+  return resolvedProfile;
 }
 
 /**
@@ -473,7 +671,7 @@ function extractDataFromCapturedJson(capturedProfileData = {}, capturedResponses
         "name", "fullName", "full_name", "student_name", "studentName", "applicant_name",
         "applicantName", "loanee_name", "user_name", "userName"
       ]);
-      if (val && typeof val === "string" && val.trim().length > 1 && !/dashboard|sign out|logout|profile|null|undefined/i.test(val)) {
+      if (val && typeof val === "string" && !isBoilerplateText(val) && FIELD_VALIDATORS.name(val)) {
         extracted.name = val.trim();
       }
     }
@@ -482,11 +680,11 @@ function extractDataFromCapturedJson(capturedProfileData = {}, capturedResponses
     if (!extracted.nationalId) {
       const val = findValueInObject(payload, [
         "nationalId", "national_id", "national_id_no", "id_no", "idNo", "id_number",
-        "idNumber", "identity_no", "idnumber", "id"
+        "idNumber", "identity_no", "idnumber", "id", "user_id"
       ]);
       if (val && (typeof val === "string" || typeof val === "number")) {
         const idStr = String(val).replace(/[^0-9]/g, "");
-        if (idStr.length >= 5 && idStr.length <= 10) {
+        if (FIELD_VALIDATORS.nationalId(idStr)) {
           extracted.nationalId = idStr;
         }
       }
@@ -498,10 +696,10 @@ function extractDataFromCapturedJson(capturedProfileData = {}, capturedResponses
         "kcseIndex", "kcse_index", "kcse_no", "kcseNo", "index_number", "indexNumber",
         "index_no", "indexNo", "kcse", "indexNumberYear"
       ]);
-      if (val && typeof val === "string") {
+      if (val && typeof val === "string" && !isBoilerplateText(val)) {
         const kMatch = val.match(/\b\d{11}(?:\/\d{4})?\b/);
-        if (kMatch) extracted.kcseIndex = kMatch[0];
-        else if (val.trim().length >= 8) extracted.kcseIndex = val.trim();
+        if (kMatch && FIELD_VALIDATORS.kcseIndex(kMatch[0])) extracted.kcseIndex = kMatch[0];
+        else if (FIELD_VALIDATORS.kcseIndex(val)) extracted.kcseIndex = val.trim();
       }
     }
 
@@ -511,7 +709,7 @@ function extractDataFromCapturedJson(capturedProfileData = {}, capturedResponses
         "institution", "institution_name", "institutionName", "university", "university_name",
         "college", "college_name", "school", "school_name", "inst_name"
       ]);
-      if (val && typeof val === "string" && val.trim().length > 2 && val !== "Data not found") {
+      if (val && typeof val === "string" && !isBoilerplateText(val) && FIELD_VALIDATORS.institution(val)) {
         extracted.institution = val.trim();
       }
     }
@@ -522,7 +720,7 @@ function extractDataFromCapturedJson(capturedProfileData = {}, capturedResponses
         "programme", "programme_name", "programmeName", "program", "program_name",
         "programName", "course", "course_name", "courseName", "degree", "degree_name"
       ]);
-      if (val && typeof val === "string" && val.trim().length > 2 && val !== "Data not found") {
+      if (val && typeof val === "string" && !isBoilerplateText(val) && FIELD_VALIDATORS.programme(val)) {
         extracted.programme = val.trim();
       }
     }
@@ -533,7 +731,7 @@ function extractDataFromCapturedJson(capturedProfileData = {}, capturedResponses
         "band", "allocated_band", "allocatedBand", "funding_band", "fundingBand",
         "band_allocated", "band_name", "bandName", "band_num", "bandNum", "current_band", "band_code"
       ]);
-      if (val !== null && val !== undefined) {
+      if (val !== null && val !== undefined && !isBoilerplateText(val)) {
         const bParsed = parseInt(String(val).replace(/[^0-9]/g, ""), 10);
         if (!isNaN(bParsed) && bParsed >= 1 && bParsed <= 5) {
           extracted.band = bParsed;
@@ -550,7 +748,7 @@ function extractDataFromCapturedJson(capturedProfileData = {}, capturedResponses
         "loan_balance", "loanBalance", "total_due", "totalDue", "total_outstanding",
         "totalOutstanding", "balance", "current_balance", "out_balance"
       ]);
-      if (val !== null && val !== undefined && val !== "") {
+      if (val !== null && val !== undefined && val !== "" && !isBoilerplateText(val)) {
         extracted.outstandingDue = typeof val === "number" ? `KES ${val.toLocaleString()}` : String(val).trim();
       }
     }
@@ -561,7 +759,7 @@ function extractDataFromCapturedJson(capturedProfileData = {}, capturedResponses
         "loanAwarded", "loan_awarded", "awardedPrincipal", "awarded_principal",
         "total_loan", "totalLoan", "allocated_loan", "allocatedLoan", "loan_amount", "loanAmount"
       ]);
-      if (val !== null && val !== undefined && val !== "") {
+      if (val !== null && val !== undefined && val !== "" && !isBoilerplateText(val)) {
         extracted.loanAwarded = val;
       }
     }
@@ -572,7 +770,7 @@ function extractDataFromCapturedJson(capturedProfileData = {}, capturedResponses
         "scholarshipAmount", "scholarship_amount", "total_scholarship", "totalScholarship",
         "scholarship", "allocated_scholarship", "scholarship_awarded"
       ]);
-      if (val !== null && val !== undefined && val !== "") {
+      if (val !== null && val !== undefined && val !== "" && !isBoilerplateText(val)) {
         extracted.scholarshipAmount = val;
       }
     }
@@ -580,34 +778,34 @@ function extractDataFromCapturedJson(capturedProfileData = {}, capturedResponses
     // Tuition Loan & Upkeep Loan & Household Fee
     if (!extracted.tuitionLoan) {
       const val = findValueInObject(payload, ["tuitionLoan", "tuition_loan", "allocated_tuition", "tuition"]);
-      if (val !== null && val !== undefined && val !== "") extracted.tuitionLoan = val;
+      if (val !== null && val !== undefined && val !== "" && !isBoilerplateText(val)) extracted.tuitionLoan = val;
     }
     if (!extracted.upkeepLoan) {
       const val = findValueInObject(payload, ["upkeepLoan", "upkeep_loan", "living_allowance", "allocated_upkeep", "upkeep"]);
-      if (val !== null && val !== undefined && val !== "") extracted.upkeepLoan = val;
+      if (val !== null && val !== undefined && val !== "" && !isBoilerplateText(val)) extracted.upkeepLoan = val;
     }
     if (!extracted.householdFee) {
       const val = findValueInObject(payload, ["householdFee", "household_fee", "household_contribution", "householdContribution", "family_contribution"]);
-      if (val !== null && val !== undefined && val !== "") extracted.householdFee = val;
+      if (val !== null && val !== undefined && val !== "" && !isBoilerplateText(val)) extracted.householdFee = val;
     }
 
     // Total Repaid
     if (extracted.totalRepaid === undefined) {
       const val = findValueInObject(payload, ["totalRepaid", "total_repaid", "repaid", "amount_repaid", "total_payment", "paid"]);
-      if (val !== null && val !== undefined && val !== "") extracted.totalRepaid = val;
+      if (val !== null && val !== undefined && val !== "" && !isBoilerplateText(val)) extracted.totalRepaid = val;
     }
 
     // Year of Study & Current Semester
     if (!extracted.yearOfStudy) {
       const val = findValueInObject(payload, ["yearOfStudy", "year_of_study", "study_year", "year", "current_year"]);
-      if (val) {
+      if (val && FIELD_VALIDATORS.yearOfStudy(val)) {
         const parsedY = parseInt(String(val).replace(/[^0-9]/g, ""), 10);
         if (!isNaN(parsedY) && parsedY >= 1 && parsedY <= 6) extracted.yearOfStudy = parsedY;
       }
     }
     if (!extracted.currentSemester) {
       const val = findValueInObject(payload, ["currentSemester", "current_semester", "semester", "study_semester", "sem"]);
-      if (val) {
+      if (val && FIELD_VALIDATORS.currentSemester(val)) {
         const parsedS = parseInt(String(val).replace(/[^0-9]/g, ""), 10);
         if (!isNaN(parsedS) && parsedS >= 1 && parsedS <= 3) extracted.currentSemester = parsedS;
       }
@@ -616,17 +814,17 @@ function extractDataFromCapturedJson(capturedProfileData = {}, capturedResponses
     // Academic Year
     if (!extracted.academicYear) {
       const val = findValueInObject(payload, ["academicYear", "academic_year", "financial_year", "fin_year", "year_name"]);
-      if (val && typeof val === "string" && val.trim().length > 3) extracted.academicYear = val.trim();
+      if (val && typeof val === "string" && FIELD_VALIDATORS.academicYear(val)) extracted.academicYear = val.trim();
     }
 
     // Bank Details
     if (!extracted.bankName) {
       const val = findValueInObject(payload, ["bankName", "bank_name", "bank", "disbursement_bank", "upkeep_bank"]);
-      if (val && typeof val === "string" && val.trim().length > 1) extracted.bankName = val.trim();
+      if (val && typeof val === "string" && val.trim().length > 1 && !isBoilerplateText(val)) extracted.bankName = val.trim();
     }
     if (!extracted.accountNumber) {
       const val = findValueInObject(payload, ["accountNumber", "account_number", "account_no", "accountNo", "bank_account", "bank_account_no", "acc_no"]);
-      if (val && (typeof val === "string" || typeof val === "number") && String(val).trim().length > 3) {
+      if (val && FIELD_VALIDATORS.accountNumber(val)) {
         extracted.accountNumber = String(val).trim();
       }
     }
@@ -634,17 +832,21 @@ function extractDataFromCapturedJson(capturedProfileData = {}, capturedResponses
     // Application Status & Ref
     if (!extracted.applicationStatus) {
       const val = findValueInObject(payload, ["applicationStatus", "application_status", "app_status", "appStatus", "status", "stage"]);
-      if (val && typeof val === "string" && val.trim().length > 1) extracted.applicationStatus = val.trim();
+      if (val && typeof val === "string" && val.trim().length > 1 && !isBoilerplateText(val) && !/^(dashboard|menu|profile)$/i.test(val)) {
+        extracted.applicationStatus = val.trim();
+      }
     }
     if (!extracted.applicationRef) {
       const val = findValueInObject(payload, ["applicationRef", "application_ref", "app_ref", "appRef", "batch_no", "batch_number", "batchNo", "application_number", "reference_no", "batch"]);
-      if (val && typeof val === "string" && val.trim().length > 1) extracted.applicationRef = val.trim();
+      if (val && typeof val === "string" && val.trim().length > 1 && !isBoilerplateText(val)) {
+        extracted.applicationRef = val.trim();
+      }
     }
 
     // Disbursements Array
     const disbs = findDisbursementsInObject(payload);
     if (disbs.length > 0 && (!extracted.disbursements || extracted.disbursements.length === 0)) {
-      extracted.disbursements = disbs;
+      extracted.disbursements = disbs.filter(d => !isBoilerplateText(d.purpose) && !isBoilerplateText(d.status));
     }
   }
 
@@ -661,9 +863,9 @@ function extractDataFromPageRegex(text = "") {
   // 1. KCSE Index: /\b\d{11}(?:\/\d{4})?\b/
   const kcseLabeled = text.match(/(?:kcse(?:\s*index|\s*no\.?)?|index\s*no\.?|index\s*number)\s*[:#-]?\s*(\d{11}(?:\/\d{4})?)/i);
   const kcseDirect = text.match(/\b(\d{11}(?:\/\d{4})?)\b/);
-  if (kcseLabeled && kcseLabeled[1]) {
+  if (kcseLabeled && kcseLabeled[1] && FIELD_VALIDATORS.kcseIndex(kcseLabeled[1])) {
     extracted.kcseIndex = kcseLabeled[1].trim();
-  } else if (kcseDirect && kcseDirect[1]) {
+  } else if (kcseDirect && kcseDirect[1] && FIELD_VALIDATORS.kcseIndex(kcseDirect[1])) {
     extracted.kcseIndex = kcseDirect[1].trim();
   }
 
@@ -683,76 +885,89 @@ function extractDataFromPageRegex(text = "") {
   // 3. National ID: /\b\d{8}\b/
   const idLabeled = text.match(/(?:national\s*id(?:\s*no\.?)?|id\s*number|id\s*no\.?|id\/passport)\s*[:#-]?\s*(\d{6,10})\b/i);
   const idDirect = text.match(/\b(\d{8})\b/);
-  if (idLabeled && idLabeled[1]) {
+  if (idLabeled && idLabeled[1] && FIELD_VALIDATORS.nationalId(idLabeled[1])) {
     extracted.nationalId = idLabeled[1].trim();
-  } else if (idDirect && idDirect[1]) {
+  } else if (idDirect && idDirect[1] && FIELD_VALIDATORS.nationalId(idDirect[1])) {
     extracted.nationalId = idDirect[1].trim();
   }
 
   // 4. Currency/Outstanding Due: /KES\s*[\d,]+(?:\.\d{2})?/i
   const outLabeled = text.match(/(?:total\s*outstanding|outstanding\s*due|loan\s*balance|outstanding\s*balance|total\s*due|loan\s*due|total\s*loan\s*due)\s*[:#-]?\s*(KES\s*[\d,]+(?:\.\d{2})?|[\d,]+(?:\.\d{2})?)/i);
   const outDirect = text.match(/\b(KES\s*[\d,]+(?:\.\d{2})?)\b/i);
-  if (outLabeled && outLabeled[1]) {
+  if (outLabeled && outLabeled[1] && !isBoilerplateText(outLabeled[1])) {
     const val = outLabeled[1].trim();
     extracted.outstandingDue = val.toUpperCase().startsWith("KES") ? val : `KES ${val}`;
-  } else if (outDirect && outDirect[1]) {
+  } else if (outDirect && outDirect[1] && !isBoilerplateText(outDirect[1])) {
     extracted.outstandingDue = outDirect[1].trim();
   }
 
   // 5. Institution extraction
   for (const inst of INSTITUTIONS) {
     if (text.toLowerCase().includes(inst.name.toLowerCase()) || text.toLowerCase().includes(inst.code.toLowerCase())) {
-      extracted.institution = inst.name;
-      if (inst.level) extracted.level = inst.level;
-      break;
+      if (FIELD_VALIDATORS.institution(inst.name)) {
+        extracted.institution = inst.name;
+        if (inst.level) extracted.level = inst.level;
+        break;
+      }
     }
   }
 
   // 6. Programme extraction
   for (const [key, prog] of Object.entries(PROGRAMMES)) {
     if (text.toLowerCase().includes(key) || text.toLowerCase().includes(prog.name.toLowerCase())) {
-      extracted.programme = prog.name;
-      extracted.level = prog.level;
-      break;
+      if (FIELD_VALIDATORS.programme(prog.name)) {
+        extracted.programme = prog.name;
+        extracted.level = prog.level;
+        break;
+      }
     }
   }
 
   // 7. Academic Year
   const yearMatch = text.match(/\b(202[0-9]\s*[\/-]\s*202[0-9])\b/);
   if (yearMatch && yearMatch[1]) {
-    extracted.academicYear = yearMatch[1].replace(/\s+/g, "");
+    const cleanYear = yearMatch[1].replace(/\s+/g, "");
+    if (FIELD_VALIDATORS.academicYear(cleanYear)) {
+      extracted.academicYear = cleanYear;
+    }
   }
 
   // 8. Year of study
   const studyYearMatch = text.match(/\b(?:year\s*([1-6])|([1-6])(?:st|nd|rd|th)\s*year)\b/i);
   if (studyYearMatch) {
-    extracted.yearOfStudy = parseInt(studyYearMatch[1] || studyYearMatch[2], 10);
+    const yVal = parseInt(studyYearMatch[1] || studyYearMatch[2], 10);
+    if (FIELD_VALIDATORS.yearOfStudy(yVal)) {
+      extracted.yearOfStudy = yVal;
+    }
   }
 
   // 9. Semester
   const semMatch = text.match(/\b(?:semester\s*([1-3])|sem\s*([1-3]))\b/i);
   if (semMatch) {
-    extracted.currentSemester = parseInt(semMatch[1] || semMatch[2], 10);
+    const sVal = parseInt(semMatch[1] || semMatch[2], 10);
+    if (FIELD_VALIDATORS.currentSemester(sVal)) {
+      extracted.currentSemester = sVal;
+    }
   }
 
   // 10. Bank Name & Account Number
   const bankMatch = text.match(/(?:Bank\s*Name|Bank|Upkeep\s*Bank)\s*[:#-]?\s*([A-Za-z\s]+(?:Bank|M-Pesa|SACCO|Microfinance))/i);
-  if (bankMatch && bankMatch[1]) {
+  if (bankMatch && bankMatch[1] && !isBoilerplateText(bankMatch[1])) {
     extracted.bankName = bankMatch[1].trim();
   }
   const accMatch = text.match(/(?:Account\s*Number|Account\s*No\.?|A\/C\s*No\.?)\s*[:#-]?\s*(\d{6,16})/i);
-  if (accMatch && accMatch[1]) {
+  if (accMatch && accMatch[1] && FIELD_VALIDATORS.accountNumber(accMatch[1])) {
     extracted.accountNumber = accMatch[1].trim();
   }
 
   // 11. Application Status & Ref
   const appStatusMatch = text.match(/(?:Application\s*Status|Funding\s*Status|Status)\s*[:#-]?\s*([A-Za-z\s]{3,30})/i);
-  if (appStatusMatch && appStatusMatch[1] && !/dashboard|menu|profile/i.test(appStatusMatch[1])) {
+  if (appStatusMatch && appStatusMatch[1] && !isBoilerplateText(appStatusMatch[1]) && !/dashboard|menu|profile/i.test(appStatusMatch[1])) {
     extracted.applicationStatus = appStatusMatch[1].trim();
   }
   const appRefMatch = text.match(/(?:Application\s*Ref|Ref\s*No\.?|Batch\s*No\.?)\s*[:#-]?\s*([A-Z0-9\/-]+)/i) ||
                       text.match(/\b(HEF-[A-Z0-9-]+|HELB-[A-Z0-9-]+)\b/i);
-  if (appRefMatch && appRefMatch[1]) {
+  if (appRefMatch && appRefMatch[1] && !isBoilerplateText(appRefMatch[1])) {
     extracted.applicationRef = appRefMatch[1].trim();
   }
 
@@ -763,6 +978,11 @@ module.exports = {
   INSTITUTIONS,
   PROGRAMMES,
   HEF_BANDS,
+  isBoilerplateText,
+  FIELD_VALIDATORS,
+  validateField,
+  evaluateDataIntegrity,
+  INTEGRITY_UNVERIFIED_THRESHOLD,
   resolveHefProfile,
   isHelbDomainQuery,
   extractUserDetailsFromText,
