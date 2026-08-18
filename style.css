@@ -667,4 +667,156 @@ html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--b
   .hero-card { width: 100%; max-width: 280px; }
   .msg-bubble { max-width: 88%; }
   .profile-toggle-btn span { display: none; }
+  .hef-grid-2 { grid-template-columns: 1fr !important; }
+  .hef-student-banner { flex-direction: column; align-items: flex-start; gap: 10px; }
 }
+
+/* ── HEF Portal Live Dashboard Component ── */
+.hef-dashboard-card {
+  background: linear-gradient(160deg, rgba(17,24,39,0.95), rgba(12,14,28,0.98)) !important;
+  border: 1px solid rgba(59,130,246,0.3) !important;
+  border-radius: 16px;
+  padding: 18px 20px;
+  box-shadow: 0 12px 36px rgba(0,0,0,0.45);
+}
+.hef-dash-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding-bottom: 12px;
+  margin-bottom: 14px;
+}
+.hef-dash-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.hef-shield-icon {
+  font-size: 24px;
+}
+.hef-dash-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.hef-dash-sub {
+  font-size: 11px;
+  color: var(--t3);
+}
+.hef-sync-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: rgba(16,185,129,0.12);
+  border: 1px solid rgba(16,185,129,0.28);
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 600;
+}
+.hef-student-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.hef-avatar-circle {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--blue-d), var(--red-d));
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.hef-student-info {
+  flex: 1;
+}
+.hef-student-name {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--t1);
+  margin-bottom: 2px;
+}
+.hef-student-meta {
+  font-size: 11.5px;
+  color: var(--t2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.hef-band-pill {
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.band-1 { background: rgba(16,185,129,0.15); color: var(--green); border: 1px solid rgba(16,185,129,0.3); }
+.band-2 { background: rgba(59,130,246,0.15); color: var(--blue); border: 1px solid rgba(59,130,246,0.3); }
+.band-3 { background: rgba(245,158,11,0.15); color: var(--yellow); border: 1px solid rgba(245,158,11,0.3); }
+.band-4 { background: rgba(139,92,246,0.15); color: #a78bfa; border: 1px solid rgba(139,92,246,0.3); }
+.band-5 { background: rgba(236,72,153,0.15); color: #f472b6; border: 1px solid rgba(236,72,153,0.3); }
+
+.hef-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.hef-card-block {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.hef-block-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--t2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.hef-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  padding: 4px 0;
+  color: var(--t2);
+}
+.hef-detail-row .lbl {
+  color: var(--t3);
+}
+.hef-detail-row .val {
+  color: var(--t1);
+  text-align: right;
+}
+.hef-detail-row.highlight-row {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(255,255,255,0.08);
+}
+.hef-actions-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+

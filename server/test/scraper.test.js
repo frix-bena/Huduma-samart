@@ -352,11 +352,16 @@ async function runTests() {
     assert.strictEqual(auditReport.nationalId.status, "FOUND");
   });
 
+  await page.route("**/*", route => {
+    if (route.request().url().startsWith("http")) return route.abort();
+    return route.continue();
+  });
+
   await asyncTest("debug-dashboard.html snapshot extracts authentic attributes without footer leakage", async () => {
     const htmlPath = path.resolve(__dirname, "../../debug-dashboard.html");
     if (fs.existsSync(htmlPath)) {
       const htmlContent = fs.readFileSync(htmlPath, "utf-8");
-      await page.setContent(htmlContent);
+      await page.setContent(htmlContent, { waitUntil: "commit", timeout: 10000 });
 
       const auditReport = {};
       const name = await scrapeFieldByLabels(page, "name", ["Full Name", "Name"], [".dropdown-user .user-name b", "input#unames"], auditReport);
