@@ -3,7 +3,10 @@ node_modules/
 server/node_modules/
 
 # Playwright cache & screenshots
+screenshots/
 server/screenshots/
+debug-dashboard*.png
+debug-dashboard*.html
 .cache/
 
 # Environment files

@@ -295,21 +295,26 @@ async function scrapeDashboardFromPage(page) {
   await page.waitForLoadState('networkidle').catch(() => {});
   await page.waitForTimeout(3000); // Give React/Angular an extra 3 seconds to render the DOM
 
-  // 2. TAKE A DASHBOARD SCREENSHOT
-  try {
-    await page.screenshot({ path: 'debug-dashboard-fully-loaded.png', fullPage: true });
-    console.log("[playwright-scraper] Saved screenshot to debug-dashboard-fully-loaded.png");
-  } catch (err) {
-    console.warn("[playwright-scraper] Screenshot failed:", err.message);
-  }
+  // 2. TAKE A DASHBOARD SCREENSHOT & DUMP HTML (Debug Mode Only)
+  if (process.env.DEBUG_VISIBLE === "true") {
+    const ts = Date.now();
+    const screenshotPath = path.join(SCREENSHOTS_DIR, `debug-dashboard-fully-loaded-${ts}.png`);
+    const htmlPath = path.join(SCREENSHOTS_DIR, `debug-dashboard-${ts}.html`);
 
-  // 3. DUMP THE HTML TO A FILE (Crucial)
-  try {
-    const html = await page.content();
-    fs.writeFileSync('debug-dashboard.html', html);
-    console.log("[playwright-scraper] Saved dashboard HTML to debug-dashboard.html");
-  } catch (err) {
-    console.warn("[playwright-scraper] HTML dump failed:", err.message);
+    try {
+      await page.screenshot({ path: screenshotPath, fullPage: true });
+      console.log(`[playwright-scraper] Saved screenshot to ${screenshotPath}`);
+    } catch (err) {
+      console.warn("[playwright-scraper] Screenshot failed:", err.message);
+    }
+
+    try {
+      const html = await page.content();
+      fs.writeFileSync(htmlPath, html);
+      console.log(`[playwright-scraper] Saved dashboard HTML to ${htmlPath}`);
+    } catch (err) {
+      console.warn("[playwright-scraper] HTML dump failed:", err.message);
+    }
   }
 
   // Wait for HEF dashboard data container / profile details to mount
