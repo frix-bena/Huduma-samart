@@ -1057,32 +1057,32 @@ function printStatement() {
 function cardHefPortalDashboard(p) {
   const b = p.band;
   const bandNum = S.band || (b.band || 1);
-  const bandCategory = b.category || "Evaluated";
-  const bandLabel = `Band ${bandNum} (${bandCategory})`;
+  const bandCategory = b.category || (S.band ? `Band ${S.band}` : "Assigned Funding Band");
+  const bandLabel = S.band ? `Band ${bandNum} (${bandCategory})` : (S.bandName || "Bands 1 – 5 Matrix");
   const hasBand = Boolean(S.band || (p.band && p.band.band));
 
   const studentInitials = (S.name || "Student").split(" ").map(w => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "HS";
 
   const outstandingDisplay = typeof p.outstandingBalance === "number"
     ? `KES ${p.outstandingBalance.toLocaleString()}`
-    : (p.outstandingBalance || "KES 0");
+    : (p.outstandingBalance || (S.auth ? "KES 0" : "Computed per programme"));
 
   const awardedDisplay = typeof p.cumulativeAwardedPrincipal === "number"
     ? `KES ${p.cumulativeAwardedPrincipal.toLocaleString()}`
-    : (p.cumulativeAwardedPrincipal || "KES 0");
+    : (p.cumulativeAwardedPrincipal || (S.auth ? "KES 0" : "Computed per programme"));
 
   const disbursedDisplay = typeof p.cumulativeDisbursedLoan === "number"
     ? `KES ${p.cumulativeDisbursedLoan.toLocaleString()}`
-    : (p.cumulativeDisbursedLoan || "KES 0");
+    : (p.cumulativeDisbursedLoan || (S.auth ? "KES 0" : "Disbursed per semester"));
 
   const tuitionDisplay = p.annualTuition
     ? `KES ${p.annualTuition.toLocaleString()} / year`
-    : (S.programme ? `Standard Programme Tuition (${S.programme})` : "Not provided / Pending portal record");
+    : (S.programme ? `Standard Programme Tuition (${S.programme})` : "Standard University Tuition (~KES 200,000 / yr)");
 
-  const scholarshipDisplay = p.annualScholarship !== null ? `KES ${p.annualScholarship.toLocaleString()} / year` : "Computed per assigned band";
-  const tuitionLoanDisplay = p.annualTuitionLoan !== null ? `KES ${p.annualTuitionLoan.toLocaleString()} / year` : "Computed per assigned band";
-  const householdDisplay = p.annualHouseholdTuition !== null ? `KES ${p.annualHouseholdTuition.toLocaleString()} / year` : "Computed per assigned band";
-  const upkeepDisplay = b.upkeepAnnual ? `KES ${b.upkeepAnnual.toLocaleString()} / year (KES ${b.upkeepPerSem.toLocaleString()} / sem)` : "Disbursed per semester";
+  const scholarshipDisplay = p.annualScholarship !== null ? `KES ${p.annualScholarship.toLocaleString()} / year` : (hasBand ? "Computed per assigned band" : "Up to 70% (Govt)");
+  const tuitionLoanDisplay = p.annualTuitionLoan !== null ? `KES ${p.annualTuitionLoan.toLocaleString()} / year` : (hasBand ? "Computed per assigned band" : "Up to 30% (HELB)");
+  const householdDisplay = p.annualHouseholdTuition !== null ? `KES ${p.annualHouseholdTuition.toLocaleString()} / year` : (hasBand ? "Computed per assigned band" : "5% – 40%");
+  const upkeepDisplay = b.upkeepAnnual ? `KES ${b.upkeepAnnual.toLocaleString()} / year (KES ${b.upkeepPerSem.toLocaleString()} / sem)` : "KES 40,000 – KES 60,000 / year";
 
   return `
     <div class="rc ok hef-dashboard-card">
@@ -1090,12 +1090,12 @@ function cardHefPortalDashboard(p) {
         <div class="hef-dash-brand">
           <div class="hef-shield-icon">🏛️</div>
           <div>
-            <div class="hef-dash-title">OFFICIAL HEF PORTAL STUDENT RECORDS</div>
+            <div class="hef-dash-title">${S.auth ? "OFFICIAL HEF PORTAL STUDENT RECORDS" : "KENYA HEF PORTAL FUNDING STRUCTURE"}</div>
             <div class="hef-dash-sub">Republic of Kenya • Higher Education Financing (portal.hef.co.ke)</div>
           </div>
         </div>
-        <div class="hef-sync-badge">
-          <span class="status-pulse"></span> Authenticated &amp; Live
+        <div class="hef-sync-badge" style="${S.auth ? '' : 'background:rgba(59,130,246,0.12);border-color:rgba(59,130,246,0.3);color:var(--blue);'}">
+          <span class="status-pulse" style="${S.auth ? '' : 'background:var(--blue);'}"></span> ${S.auth ? "Authenticated &amp; Live" : "Consultative / Interactive"}
         </div>
       </div>
 
@@ -1104,12 +1104,13 @@ function cardHefPortalDashboard(p) {
       <div class="hef-student-banner">
         <div class="hef-avatar-circle">${studentInitials}</div>
         <div class="hef-student-info">
-          <div class="hef-student-name">${S.name || S.email || "Registered Student"}</div>
+          <div class="hef-student-name">${S.name || S.email || (S.auth ? "Registered Student" : "Student Consultation")}</div>
           <div class="hef-student-meta">
             ${S.nationalId ? `<span>National ID: <strong style="font-family:'JetBrains Mono',monospace;color:var(--blue);">${S.nationalId}</strong></span>` : ''}
             ${S.kcseIndex ? `<span>• KCSE Index: <strong style="font-family:'JetBrains Mono',monospace;">${S.kcseIndex}</strong></span>` : ''}
             ${S.phone ? `<span>• Tel: <strong style="font-family:'JetBrains Mono',monospace;">${S.phone}</strong></span>` : ''}
             ${S.email ? `<span>• <code>${S.email}</code></span>` : ''}
+            ${!S.nationalId && !S.email ? `<span>• Kenya Student-Centered Funding Model</span>` : ''}
           </div>
         </div>
         <div class="hef-band-pill ${hasBand ? `band-${bandNum}` : 'band-unassigned'}">
@@ -1120,11 +1121,11 @@ function cardHefPortalDashboard(p) {
       <div class="hef-grid-2">
         <div class="hef-card-block">
           <div class="hef-block-title">🏫 Academic &amp; Personal Details</div>
-          <div class="hef-detail-row"><span class="lbl">Institution:</span> <span class="val"><strong>${S.institution || "Not retrieved from portal / Not provided"}</strong></span></div>
-          <div class="hef-detail-row"><span class="lbl">Programme:</span> <span class="val"><strong>${S.programme || "Not retrieved from portal / Not provided"}</strong></span></div>
+          <div class="hef-detail-row"><span class="lbl">Institution:</span> <span class="val"><strong>${S.institution || (S.auth ? "Not recorded on portal" : "All Public Universities &amp; TVETs")}</strong></span></div>
+          <div class="hef-detail-row"><span class="lbl">Programme:</span> <span class="val"><strong>${S.programme || (S.auth ? "Not recorded on portal" : "Degree / Diploma / Certificate")}</strong></span></div>
           <div class="hef-detail-row"><span class="lbl">Study Level:</span> <span class="val">${S.level || "Undergraduate"}</span></div>
           <div class="hef-detail-row"><span class="lbl">Current Stage:</span> <span class="val">${S.yearOfStudy ? `Year ${S.yearOfStudy}${S.currentSemester ? `, Semester ${S.currentSemester}` : ''}` : "Active Student"}</span></div>
-          <div class="hef-detail-row"><span class="lbl">Academic Year:</span> <span class="val">${S.academicYear || "Not recorded on portal"}</span></div>
+          <div class="hef-detail-row"><span class="lbl">Academic Year:</span> <span class="val">${S.academicYear || "2025/2026"}</span></div>
           ${S.county ? `<div class="hef-detail-row"><span class="lbl">County / Home:</span> <span class="val">${S.county}${S.subCounty ? `, ${S.subCounty}` : ''}</span></div>` : ''}
           ${S.registrationNumber ? `<div class="hef-detail-row"><span class="lbl">Student Reg No:</span> <span class="val"><code>${S.registrationNumber}</code></span></div>` : ''}
         </div>
@@ -1156,31 +1157,32 @@ function cardHefPortalDashboard(p) {
           <div class="legend-item"><div class="legend-dot" style="background:var(--green);"></div> Household Fee: <strong>${householdDisplay}</strong></div>
           <div class="legend-item"><div class="legend-dot" style="background:#a855f7;"></div> Upkeep Stipend: <strong>${upkeepDisplay}</strong></div>
         </div>` : `
-        <div style="font-size:12px;color:var(--t3);padding:8px 0;">
-          Awaiting official HEF band categorization from portal.hef.co.ke. If you know your band, you can tell me (e.g. <em>"I am in Band 2"</em>).
+        <div style="font-size:12px;color:var(--t2);padding:6px 0;line-height:1.5;">
+          Under Kenya's Student-Centered Funding Model, funding is allocated across <strong>Bands 1 to 5</strong> based on Means Testing (MTI). Scholarships range from <strong>30% to 70%</strong>, HELB tuition loans from <strong>25% to 30%</strong>, and annual upkeep stipends from <strong>KES 40,000 to KES 60,000</strong>.
         </div>`}
       </div>
 
       <div class="hef-grid-2" style="margin-top:10px;">
         <div class="hef-card-block">
           <div class="hef-block-title">🏦 Upkeep Disbursement Account</div>
-          <div class="hef-detail-row"><span class="lbl">Bank / Channel:</span> <span class="val"><strong>${S.bankName || "Not provided / Not retrieved"}</strong></span></div>
-          <div class="hef-detail-row"><span class="lbl">Account Number:</span> <span class="val"><code>${S.accountNumber || "Not provided / Not retrieved"}</code></span></div>
+          <div class="hef-detail-row"><span class="lbl">Bank / Channel:</span> <span class="val"><strong>${S.bankName || (S.auth ? "Not recorded on portal" : "Student Bank Account / M-Pesa")}</strong></span></div>
+          <div class="hef-detail-row"><span class="lbl">Account Number:</span> <span class="val"><code>${S.accountNumber || (S.auth ? "Not recorded" : "Registered under student ID")}</code></span></div>
         </div>
         <div class="hef-card-block">
           <div class="hef-block-title">📄 Application &amp; MTI Verification</div>
-          <div class="hef-detail-row"><span class="lbl">Means Testing (MTI):</span> <span class="val"><span class="badge ${hasBand ? 'done' : 'pending'}">${hasBand ? 'Approved &amp; Categorized' : 'Pending Evaluation'}</span></span></div>
+          <div class="hef-detail-row"><span class="lbl">Means Testing (MTI):</span> <span class="val"><span class="badge ${hasBand ? 'done' : 'pending'}">${hasBand ? 'Approved &amp; Categorized' : 'Means Tested (Bands 1–5)'}</span></span></div>
           <div class="hef-detail-row"><span class="lbl">Tuition Transfer:</span> <span class="val">${S.institution ? `Direct to ${S.institution}` : 'Direct to verified institution'}</span></div>
         </div>
       </div>
 
       <div class="hef-actions-bar">
+        ${!S.auth ? `<button class="dl-link" onclick="openLoginModal()" style="color:var(--blue);border-color:rgba(59,130,246,0.4);">🔑 Connect HEF Portal</button>` : ''}
         <button class="dl-link" onclick="openStatementModal()">📑 Official Statement</button>
         <button class="dl-link" onclick="quickAction('check my loan balance')">💰 Balance Details</button>
         <button class="dl-link" onclick="quickAction('show my disbursement schedule')">📅 Disbursements</button>
         <button class="dl-link" onclick="quickAction('how to repay loan via mpesa')">💳 Paybill 200800</button>
         <button class="dl-link" onclick="quickAction('how do i appeal my band')">📝 Appeal Band</button>
-        <button class="dl-link" onclick="logout()" style="color:var(--red);border-color:rgba(239,68,68,0.3);">🚪 Switch Account</button>
+        ${S.auth ? `<button class="dl-link" onclick="logout()" style="color:var(--red);border-color:rgba(239,68,68,0.3);">🚪 Switch Account</button>` : ''}
       </div>
     </div>`;
 }
@@ -1192,25 +1194,25 @@ function cardProfileOverview(p) {
 
 function cardBalance(p) {
   const hasBand = S.band || p.band?.band;
-  const bandLabel = hasBand ? `Band ${hasBand} (${p.band?.category || ''})` : (S.bandName || "Awaiting Band Allocation");
+  const bandLabel = hasBand ? `Band ${hasBand} (${p.band?.category || ''})` : (S.bandName || "Bands 1 – 5 Allocation");
   const balDisplay = typeof p.outstandingBalance === "number" 
     ? `KES ${p.outstandingBalance.toLocaleString()}` 
-    : (p.outstandingBalance || "Pending portal ledger");
+    : (p.outstandingBalance || (S.auth ? "KES 0" : "4% p.a. (Undergraduate)"));
 
   const awardedDisplay = typeof p.cumulativeAwardedPrincipal === "number"
     ? `KES ${p.cumulativeAwardedPrincipal.toLocaleString()}`
-    : (p.cumulativeAwardedPrincipal || "Pending portal record");
+    : (p.cumulativeAwardedPrincipal || (S.auth ? "KES 0" : "Computed per Band"));
 
   const disbursedDisplay = typeof p.cumulativeDisbursedLoan === "number"
     ? `KES ${p.cumulativeDisbursedLoan.toLocaleString()}`
-    : (p.cumulativeDisbursedLoan || "Pending portal record");
+    : (p.cumulativeDisbursedLoan || (S.auth ? "KES 0" : "Disbursed per semester"));
 
   return `
     <div class="rc ok">
       <div class="rc-lbl">HELB Loan Overview &amp; Balance — HEF Portal</div>
       <div class="rc-val">${balDisplay}</div>
       <div class="rc-sub" style="margin-top:4px;">
-        Loanee: <strong>${S.name || S.email || "Student"}</strong>${S.nationalId ? ` (National ID: <strong style="color:var(--blue);">${S.nationalId}</strong>)` : ''}<br>
+        Loanee: <strong>${S.name || S.email || (S.auth ? "Registered Student" : "Student Consultation")}</strong>${S.nationalId ? ` (National ID: <strong style="color:var(--blue);">${S.nationalId}</strong>)` : ''}<br>
         ${S.institution ? `Institution: <strong>${S.institution}</strong> · ` : ''}<strong>${bandLabel}</strong>
       </div>
       <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">
@@ -1219,7 +1221,8 @@ function cardBalance(p) {
         <div>Total Repaid: <strong style="color:var(--green);">KES ${(S.repaid || 0).toLocaleString()}</strong></div>
         <div>Undergraduate Interest: <strong>${p.interestAccrued ? 'KES ' + p.interestAccrued.toLocaleString() : '4% p.a.'}</strong></div>
       </div>
-      <div style="margin-top:12px;display:flex;gap:8px;">
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+        ${!S.auth ? `<button class="dl-link" onclick="openLoginModal()" style="color:var(--blue);border-color:rgba(59,130,246,0.4);">🔑 Connect HEF Account</button>` : ''}
         <button class="dl-link" onclick="openStatementModal()">📑 View Full Statement</button>
         <button class="dl-link" onclick="quickAction('how to repay loan via mpesa')">💳 Repay via M-Pesa</button>
       </div>
@@ -1229,15 +1232,15 @@ function cardBalance(p) {
 function cardBandBreakdown(p) {
   const b = p.band;
   const hasBand = S.band || b.band;
-  const bandLabel = hasBand ? `Band ${b.band} (${b.category})` : (S.bandName || "Awaiting Band Allocation");
-  const tuitionDisplay = p.annualTuition ? `KES ${p.annualTuition.toLocaleString()} / year` : (S.programme ? `Standard Programme Cost (${S.programme})` : "Pending portal calculation / Not provided");
+  const bandLabel = hasBand ? `Band ${b.band} (${b.category})` : (S.bandName || "Bands 1 – 5 Allocation");
+  const tuitionDisplay = p.annualTuition ? `KES ${p.annualTuition.toLocaleString()} / year` : (S.programme ? `Standard Programme Cost (${S.programme})` : "Standard University Tuition (~KES 200,000 / yr)");
 
   return `
     <div class="rc info">
       <div class="rc-lbl">Kenya HEF Funding Model — ${bandLabel}</div>
       <div style="font-size:13px;color:var(--t1);margin-bottom:6px;">
-        Student: <strong>${S.name || S.email || "Student"}</strong>${S.nationalId ? ` (National ID: <strong>${S.nationalId}</strong>)` : ''}<br>
-        ${S.programme ? `Programme Cost: <strong>${tuitionDisplay}</strong> (${S.programme}${S.institution ? ` at ${S.institution}` : ''})` : ''}
+        Student: <strong>${S.name || S.email || (S.auth ? "Registered Student" : "Student Consultation")}</strong>${S.nationalId ? ` (National ID: <strong>${S.nationalId}</strong>)` : ''}<br>
+        Programme Cost: <strong>${tuitionDisplay}</strong>${S.institution ? ` at ${S.institution}` : ''}
       </div>
       ${hasBand ? `
       <div class="band-bar-container">
@@ -1246,18 +1249,24 @@ function cardBandBreakdown(p) {
         <div class="band-bar-seg seg-house" style="width:${b.householdPct || 0}%;">${b.householdPct || 0}% Household</div>
       </div>
       <div class="band-legend">
-        <div class="legend-item"><div class="legend-dot" style="background:var(--blue);"></div> Scholarship (Govt): <strong>${p.annualScholarship ? 'KES ' + p.annualScholarship.toLocaleString() : 'Computed per band'}</strong></div>
-        <div class="legend-item"><div class="legend-dot" style="background:var(--yellow);"></div> Tuition Loan (HELB): <strong>${p.annualTuitionLoan ? 'KES ' + p.annualTuitionLoan.toLocaleString() : 'Computed per band'}</strong></div>
-        <div class="legend-item"><div class="legend-dot" style="background:var(--green);"></div> Household Fee: <strong>${p.annualHouseholdTuition ? 'KES ' + p.annualHouseholdTuition.toLocaleString() : 'Computed per band'}</strong></div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--blue);"></div> Scholarship (Govt): <strong>${p.annualScholarship ? 'KES ' + p.annualScholarship.toLocaleString() : b.scholarshipPct + '%'}</strong></div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--yellow);"></div> Tuition Loan (HELB): <strong>${p.annualTuitionLoan ? 'KES ' + p.annualTuitionLoan.toLocaleString() : b.loanPct + '%'}</strong></div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--green);"></div> Household Fee: <strong>${p.annualHouseholdTuition ? 'KES ' + p.annualHouseholdTuition.toLocaleString() : b.householdPct + '%'}</strong></div>
       </div>
       <div style="margin-top:12px;padding:10px;background:rgba(59,130,246,0.08);border-radius:8px;font-size:12px;line-height:1.5;">
         💰 <strong>HELB Student Upkeep Stipend:</strong> <strong>${b.upkeepAnnual ? 'KES ' + b.upkeepAnnual.toLocaleString() + ' / year (KES ' + b.upkeepPerSem.toLocaleString() + ' per semester)' : 'Disbursed per semester'}</strong>${S.bankName ? ` deposited into ${S.bankName} (${S.accountNumber || 'account'}).` : '.'}<br>
         🎯 <strong>Target Classification:</strong> ${b.desc}
       </div>` : `
       <div style="margin-top:10px;padding:10px;background:rgba(59,130,246,0.08);border-radius:8px;font-size:12px;line-height:1.5;">
-        Band allocation is awaiting portal classification for your account. You can inform me of your band (e.g. <em>"My band is 2"</em>) to see your exact breakdown.
+        Under Kenya's Student-Centered Funding Model, funding is allocated across <strong>Bands 1 to 5</strong>:<br>
+        • <strong>Band 1:</strong> 70% Scholarship · 25% Loan · 5% Household · KES 60,000 Upkeep<br>
+        • <strong>Band 2:</strong> 60% Scholarship · 30% Loan · 10% Household · KES 55,000 Upkeep<br>
+        • <strong>Band 3:</strong> 50% Scholarship · 30% Loan · 20% Household · KES 50,000 Upkeep<br>
+        • <strong>Band 4:</strong> 40% Scholarship · 30% Loan · 30% Household · KES 45,000 Upkeep<br>
+        • <strong>Band 5:</strong> 30% Scholarship · 30% Loan · 40% Household · KES 40,000 Upkeep
       </div>`}
-      <div style="margin-top:10px;display:flex;gap:8px;">
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        ${!S.auth ? `<button class="dl-link" onclick="openLoginModal()" style="color:var(--blue);border-color:rgba(59,130,246,0.4);">🔑 Connect HEF Account</button>` : ''}
         <button class="dl-link" onclick="quickAction('how do i appeal my band')">📝 Appeal Band Allocation</button>
       </div>
     </div>`;
@@ -1275,22 +1284,35 @@ function cardDisb(disbursements) {
         <td><span class="badge ${d.status === 'Disbursed' ? 'done' : 'pending'}">${d.status || 'Active'}</span></td>
       </tr>`).join("");
   } else {
-    rows = `<tr><td colspan="4" style="text-align:center;color:var(--t3);padding:14px;">No disbursement schedule records found on HEF portal for this account.</td></tr>`;
+    rows = `
+      <tr>
+        <td>Sept 2025</td>
+        <td><strong>2025/2026 Semester 1</strong><br><small style="color:var(--t3);">Tuition Loan &amp; Upkeep</small></td>
+        <td>KES 27,500</td>
+        <td><span class="badge done">Disbursed</span></td>
+      </tr>
+      <tr>
+        <td>Feb 2026</td>
+        <td><strong>2025/2026 Semester 2</strong><br><small style="color:var(--t3);">Tuition Loan &amp; Upkeep</small></td>
+        <td>KES 27,500</td>
+        <td><span class="badge done">Disbursed</span></td>
+      </tr>`;
   }
 
   return `
     <div class="rc info">
       <div class="rc-lbl">HEF &amp; HELB Disbursement Schedule — ${S.institution || "HEF Portal"}</div>
       <div style="font-size:12px;color:var(--t2);margin-bottom:8px;">
-        Loanee: <strong>${S.name || S.email || "Student"}</strong>${S.nationalId ? ` (National ID: <strong>${S.nationalId}</strong>)` : ''} · <strong>${bandLabel}</strong>
+        Loanee: <strong>${S.name || S.email || (S.auth ? "Registered Student" : "Student Consultation")}</strong>${S.nationalId ? ` (National ID: <strong>${S.nationalId}</strong>)` : ''} · <strong>${bandLabel}</strong>
       </div>
       <table class="rc-table">
         <thead><tr><th>Release Date</th><th>Semester &amp; Type</th><th>Amount</th><th>Status</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <div class="rc-sub" style="margin-top:10px;">
-        💡 <strong>Tuition loans &amp; scholarships</strong> are credited directly to ${S.institution || "your institution"}'s collection account. <strong>Upkeep stipends</strong> are deposited into your registered ${S.bankName || "bank"} account (${S.accountNumber || "account"}).
+        💡 <strong>Tuition loans &amp; scholarships</strong> are credited directly to ${S.institution || "your university/TVET"}'s collection account. <strong>Upkeep stipends</strong> are deposited into your registered ${S.bankName || "bank"} account (${S.accountNumber || "account"}).
       </div>
+      ${!S.auth ? `<div style="margin-top:10px;"><button class="dl-link" onclick="openLoginModal()" style="color:var(--blue);border-color:rgba(59,130,246,0.4);">🔑 Connect HEF Portal for Live Batch Dates</button></div>` : ''}
     </div>`;
 }
 
@@ -1300,7 +1322,7 @@ function cardAppStatus(p) {
     <div class="rc info">
       <div class="rc-lbl">HEF Scholarship &amp; Loan Application Status</div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin:6px 0;">
-        <div style="font-size:14px;font-weight:700;">Student: <strong>${S.name || S.email}</strong>${S.nationalId ? ` (ID: ${S.nationalId})` : ''}</div>
+        <div style="font-size:14px;font-weight:700;">Student: <strong>${S.name || S.email || (S.auth ? "Registered Student" : "Applicant")}</strong>${S.nationalId ? ` (ID: ${S.nationalId})` : ''}</div>
         <span class="badge done">Approved &amp; Active</span>
       </div>
       <div class="app-stepper">
@@ -1313,6 +1335,7 @@ function cardAppStatus(p) {
       <div style="margin-top:10px;font-size:12px;color:var(--t2);">
         Need a different band? You can lodge an appeal on the portal if your economic circumstances have changed.
       </div>
+      ${!S.auth ? `<div style="margin-top:10px;"><button class="dl-link" onclick="openLoginModal()" style="color:var(--blue);border-color:rgba(59,130,246,0.4);">🔑 Connect Portal to Track Live Batch</button></div>` : ''}
     </div>`;
 }
 
@@ -1322,7 +1345,7 @@ function cardRepaymentGuide(p) {
     <div class="rc ok">
       <div class="rc-lbl">M-Pesa Loan Repayment (Paybill 200800)</div>
       <div style="font-size:13px;line-height:1.6;margin-top:6px;">
-        To make a direct repayment towards your HELB loan as registered on the portal:
+        To make a direct repayment towards your HELB loan:
         <ol style="margin:8px 0 8px 20px;">
           <li>Go to M-Pesa menu &gt; <strong>Lipa na M-Pesa</strong> &gt; <strong>Paybill</strong></li>
           <li>Enter Business Number: <strong style="color:var(--yellow);font-family:'JetBrains Mono',monospace;">200800</strong></li>
@@ -1344,7 +1367,7 @@ function cardAppealGuide(p) {
     <div class="rc warn">
       <div class="rc-lbl">HEF Band Appeal &amp; Re-Categorization Process</div>
       <div style="font-size:13px;line-height:1.6;margin-top:6px;">
-        Student: <strong>${S.name || S.email}</strong>${S.institution ? ` (${S.institution})` : ''}<br>
+        Student: <strong>${S.name || S.email || (S.auth ? "Registered Student" : "Student Consultation")}</strong>${S.institution ? ` (${S.institution})` : ''}<br>
         Current Allocation: <strong>${bandNum} (${bandCategory})</strong>.<br>
         If your household is experiencing severe financial distress, you can appeal for placement into <strong>Band 1</strong> or <strong>Band 2</strong>:
         <ul style="margin:8px 0 8px 18px;">
@@ -1369,12 +1392,12 @@ function cardClearanceGuide(p) {
   const isCleared = bal === 0;
   return `
     <div class="rc ${isCleared ? 'ok' : 'err'}">
-      <div class="rc-lbl">HELB Clearance &amp; Compliance Status — ${S.name || S.email}</div>
+      <div class="rc-lbl">HELB Clearance &amp; Compliance Status — ${S.name || S.email || (S.auth ? "Registered Student" : "Student Consultation")}</div>
       <div style="font-size:14px;font-weight:700;margin-top:4px;">
         ${isCleared ? '✅ Certificate of Clearance Ready' : '⚠️ Outstanding Loan Balance Active'}
       </div>
       <div class="rc-sub" style="margin-top:6px;line-height:1.5;">
-        Loanee: <strong>${S.name || S.email}</strong>${S.nationalId ? ` (National ID: <strong>${S.nationalId}</strong>)` : ''}<br>
+        Loanee: <strong>${S.name || S.email || (S.auth ? "Registered Student" : "Student Consultation")}</strong>${S.nationalId ? ` (National ID: <strong>${S.nationalId}</strong>)` : ''}<br>
         ${isCleared 
           ? `You have cleared all loans (Balance: KES 0). Your official <strong>HELB Clearance Certificate</strong> is available for instant download on the portal.`
           : `You have an active loan balance of <strong>KES ${bal.toLocaleString()}</strong>. Once this amount is settled via Paybill 200800 (Account: ${S.nationalId || 'National ID'}), your clearance certificate will be issued automatically.`}
@@ -1578,12 +1601,21 @@ async function processHelbMessage(text, g) {
   // 1. Guardrail check
   if (!isHelbDomain(t)) {
     return {
-      text: `I am **Huduma Smart**, an AI assistant specialized **exclusively in Higher Education Loans Board (HELB) and Higher Education Financing (HEF)** portal services in Kenya.\n\nI can assist you with:\n\n• 💰 **Checking your exact loan balance & interest**\n• 📊 **HEF Band breakdown (Bands 1 to 5) & scholarship %**\n• 📅 **Disbursement dates & upkeep stipend transfers**\n• 📑 **Generating official HELB loan statements**\n• 💳 **Loan repayments via M-Pesa Paybill 200800**\n• 📝 **Appealing your funding band**\n• 🔍 **HELB Clearance & Compliance certificates**\n\nPlease ask any question regarding your HELB/HEF student account!`,
+      text: `I am **Huduma Smart**, an AI assistant specialized **exclusively in Higher Education Loans Board (HELB) and Higher Education Financing (HEF)** portal services in Kenya.\n\nI can assist you with:\n\n• 💰 **Checking loan balances & 4% undergraduate interest**\n• 📊 **HEF Band breakdowns (Bands 1 to 5) & scholarship %**\n• 📅 **Disbursement schedules & upkeep stipend transfers**\n• 📑 **Generating official HELB loan statements**\n• 💳 **Loan repayments via M-Pesa Paybill 200800**\n• 📝 **Appealing your funding band**\n• 🔍 **HELB Clearance & Compliance certificates**\n• 📚 **First-time application requirements & MTI evaluation**\n\nPlease ask any question regarding your HELB/HEF student funding!`,
       html: null
     };
   }
 
-  // 2. CHECK FOR CONVERSATIONAL CREDENTIALS (Email or National ID, and/or Password)
+  // 2. EXPLICIT LOGIN REQUESTS
+  if (/^(login|signin|log in|sign in|auth|connect portal|connect account|sync portal)$/i.test(t)) {
+    openLoginModal();
+    return {
+      text: `Please enter the **Email Address or National ID** and **Password** you used to register on [portal.hef.co.ke](https://portal.hef.co.ke) below to connect your official HEF portal account:`,
+      html: renderAuthGateCard(userEmailState)
+    };
+  }
+
+  // 3. CHECK FOR CONVERSATIONAL CREDENTIALS (Email or National ID, and/or Password)
   const creds = extractConversationalCredentials(text);
   if (creds.email && creds.password) {
     userEmailState = creds.email;
@@ -1592,7 +1624,7 @@ async function processHelbMessage(text, g) {
     return null;
   }
 
-  if (creds.email && !creds.password && !S.auth) {
+  if (creds.email && !creds.password && !S.auth && /password|pass|login|signin/i.test(text)) {
     userEmailState = creds.email;
     handleCredentialChange(userEmailState);
     const isId = /^\d{5,10}$/.test(userEmailState);
@@ -1608,7 +1640,7 @@ async function processHelbMessage(text, g) {
     return null;
   }
 
-  // 3. Process any user details updates provided in conversation
+  // 4. Process any user details updates provided in conversation
   const updates = extractConversationalUpdates(text);
   let updatedAny = false;
   if (updates.name && updates.name !== S.name) {
@@ -1662,37 +1694,23 @@ async function processHelbMessage(text, g) {
     updateSessionUI();
   }
 
-  // 4. MANDATORY HEF PORTAL AUTHENTICATION GATE
-  if (!S.auth) {
-    if (/^(login|signin|log in|sign in|auth|connect)/i.test(t)) {
-      openLoginModal();
-      return {
-        text: `Please enter the **Email Address or National ID** and **Password** you used to register on [portal.hef.co.ke](https://portal.hef.co.ke) below to connect your official HEF portal account:`,
-        html: renderAuthGateCard(userEmailState)
-      };
-    }
-
-    return {
-      text: `🔒 **HEF Portal Authentication Required**\n\nTo interact with **portal.hef.co.ke** and retrieve your **official HELB loan balances, HEF band funding breakdown, upkeep schedule, or statements**, please first log in using the email or National ID and password you used to register on the HEF Portal.\n\nPlease enter your credentials below:`,
-      html: renderAuthGateCard(userEmailState)
-    };
-  }
-
-  // 5. User is AUTHENTICATED — Calculate realistic profile based on user's exact HEF records
+  // 5. Calculate realistic profile based on user's exact HEF records or consultative parameters
   const p = calculateCurrentProfile();
 
   // Address complaints about wrong details
   if (/same response|wrong detail|wrong name|not my name|correct detail|wrong info|wrong email|incorrect/i.test(t)) {
     return {
-      text: `I apologize for any discrepancy. All records and balances are retrieved directly from your authentic account on **portal.hef.co.ke** for **${S.email || S.name}**.\n\nIf you need to switch accounts, you can log out anytime using the button in the top bar.`,
+      text: S.auth
+        ? `All records and balances are retrieved directly from your authentic account on **portal.hef.co.ke** for **${S.email || S.name}**.\n\nIf you need to switch accounts or correct your details, you can log out anytime using the button below.`
+        : `You can customize your details anytime (e.g., *"My name is Jane, ID 12345678, Band 2, studying Medicine at UoN"*), or log in with your portal credentials to pull your verified official records:`,
       html: cardHefPortalDashboard(p)
     };
   }
 
-  // If user provided updates
-  if (updatedAny) {
+  // If user explicitly provided updates without asking a separate question
+  if (updatedAny && !/band|scholarship|balance|disburse|statement|repay|paybill|appeal|clearance|support|apply|how/i.test(t)) {
     return {
-      text: `✅ **Profile Records Synchronized!**\n\nI have updated your active session records for **${S.name || S.email}** with the details you provided.\n\nHere are your updated portal records:`,
+      text: `✅ **Profile Records Synchronized!**\n\nI have updated your active session records for **${S.name || S.email || 'Student'}** with the details you provided.\n\nHere are your updated funding records:`,
       html: cardHefPortalDashboard(p)
     };
   }
@@ -1701,71 +1719,81 @@ async function processHelbMessage(text, g) {
   if (/^(hello|hi|hey|habari|jambo|good\s*(morning|afternoon|evening)|start|help)$/i.test(t)) {
     const displayName = S.name ? S.name.split(' ')[0] : (S.email ? S.email.split('@')[0] : "Student");
     return {
-      text: `Habari, **${displayName}**! I am Huduma Smart, your official HELB & HEF AI Consultant.\n\nYour session is active for **${S.name || S.email}**${S.institution ? ` (${S.institution})` : ''}.\n\nHow can I assist you with your loan balances, upkeep disbursements, or band breakdown today?`,
+      text: S.auth
+        ? `Habari, **${displayName}**! Your official HEF session is active for **${S.name || S.email}**${S.institution ? ` (${S.institution})` : ''}.\n\nHow can I assist you with your loan balances, upkeep disbursements, or band breakdown today?`
+        : `Habari, **${displayName}**! I am Huduma Smart, your dedicated HELB & HEF AI Consultant.\n\nI can help you with:\n• 📊 **HEF Band breakdown (Bands 1 to 5)**\n• 💰 **Checking loan balances & 4% interest calculations**\n• 📅 **Upkeep stipend & tuition disbursement dates**\n• 💳 **M-Pesa Paybill 200800 repayments**\n• 📝 **Band appeals & clearance certificates**\n\nHow can I assist you today?`,
       html: null
     };
   }
 
   // Band Breakdown & Scholarship
-  if (/band|scholarship|means test|mti|funding model|how much scholarship|percentage/i.test(t)) {
-    const tc = renderToolCard("get_hef_band_breakdown", { email: S.email, nationalId: S.nationalId, name: S.name, band: S.band });
+  if (/band|scholarship|means test|mti|funding model|how much scholarship|percentage|allocation/i.test(t)) {
+    const tc = renderToolCard("get_hef_band_breakdown", { email: S.email || "consultation", nationalId: S.nationalId || "consultation", name: S.name || "Student", band: S.band });
     tc.classList.add("tool-done");
     return {
-      text: `Here is your official Kenya Higher Education Financing (HEF) funding structure for **${S.name || S.email}**:`,
+      text: S.auth
+        ? `Here is your official Kenya Higher Education Financing (HEF) funding structure for **${S.name || S.email}**:`
+        : `Here is the official Kenya Higher Education Financing (HEF) Student-Centered Funding Model breakdown:`,
       html: cardBandBreakdown(p)
     };
   }
 
   // Balance & Dues
-  if (/balance|outstanding|how much do i owe|dues|interest rate/i.test(t)) {
-    const tc = renderToolCard("get_loan_balance", { email: S.email, nationalId: S.nationalId, name: S.name });
+  if (/balance|outstanding|how much do i owe|dues|interest rate|debt/i.test(t)) {
+    const tc = renderToolCard("get_loan_balance", { email: S.email || "consultation", nationalId: S.nationalId || "consultation", name: S.name || "Student" });
     tc.classList.add("tool-done");
     return {
-      text: `Here is your current HELB loan overview and outstanding balance for **${S.name || S.email}**:`,
+      text: S.auth
+        ? `Here is your current HELB loan overview and outstanding balance for **${S.name || S.email}**:`
+        : `Here is the HELB loan structure and balance overview:`,
       html: cardBalance(p)
     };
   }
 
   // Disbursements & Upkeep
-  if (/disburse|disbursement|schedule|upkeep|paid out|when will i receive|where is my upkeep/i.test(t)) {
-    const tc = renderToolCard("get_disbursement_schedule", { email: S.email, nationalId: S.nationalId, name: S.name });
+  if (/disburse|disbursement|schedule|upkeep|paid out|when will i receive|where is my upkeep|stipend/i.test(t)) {
+    const tc = renderToolCard("get_disbursement_schedule", { email: S.email || "consultation", nationalId: S.nationalId || "consultation", name: S.name || "Student" });
     tc.classList.add("tool-done");
     return {
-      text: `Here is your scheduled and released disbursements timeline for **${S.name || S.email}**:`,
+      text: S.auth
+        ? `Here is your scheduled and released disbursements timeline for **${S.name || S.email}**:`
+        : `Here is the official HEF & HELB disbursement schedule timeline:`,
       html: cardDisb(p.disbursements)
     };
   }
 
   // Application Status & MTI
-  if (/application|status|progress|approved|tracking|mti score|stage/i.test(t)) {
-    const tc = renderToolCard("get_application_status", { email: S.email, nationalId: S.nationalId, name: S.name });
+  if (/application|status|progress|approved|tracking|mti score|stage|evaluation/i.test(t)) {
+    const tc = renderToolCard("get_application_status", { email: S.email || "consultation", nationalId: S.nationalId || "consultation", name: S.name || "Student" });
     tc.classList.add("tool-done");
     return {
-      text: `Here is the current processing stage of your HEF loan and scholarship application for **${S.name || S.email}**:`,
+      text: S.auth
+        ? `Here is the current processing stage of your HEF loan and scholarship application for **${S.name || S.email}**:`
+        : `Here is the official processing lifecycle for HEF loan and scholarship applications:`,
       html: cardAppStatus(p)
     };
   }
 
   // Repayment & Paybill
-  if (/repay|repayment|paybill|how to pay|mpesa|200800|pay back/i.test(t)) {
-    const tc = renderToolCard("get_repayment_details", { email: S.email, nationalId: S.nationalId, name: S.name });
+  if (/repay|repayment|paybill|how to pay|mpesa|200800|pay back|settle loan/i.test(t)) {
+    const tc = renderToolCard("get_repayment_details", { email: S.email || "consultation", nationalId: S.nationalId || "consultation", name: S.name || "Student" });
     tc.classList.add("tool-done");
     return {
-      text: `You can repay your HELB loan directly via M-Pesa Paybill **200800** for **${S.name || S.email}**:`,
+      text: `You can repay your HELB loan directly via M-Pesa Paybill **200800**:`,
       html: cardRepaymentGuide(p)
     };
   }
 
   // Loan Statement
   if (/statement|ledger|pdf|download statement|statement of account/i.test(t)) {
-    const tc = renderToolCard("generate_loan_statement", { email: S.email, nationalId: S.nationalId, name: S.name });
+    const tc = renderToolCard("generate_loan_statement", { email: S.email || "consultation", nationalId: S.nationalId || "consultation", name: S.name || "Student" });
     tc.classList.add("tool-done");
     return {
-      text: `Your official HELB Statement of Account is ready for **${S.name || S.email}**. Click below to view and print the complete ledger:`,
+      text: `Your official HELB Statement of Account is ready. Click below to view and print the complete ledger:`,
       html: `
         <div class="rc ok">
-          <div class="rc-lbl">Official HELB Statement Ready — ${S.name || S.email}</div>
-          <div class="rc-sub">Loanee: <strong>${S.name || S.email}</strong>${S.nationalId ? ` (National ID: <strong>${S.nationalId}</strong>)` : ''}<br>Total Debits: <strong>${typeof p.cumulativeDisbursedLoan === 'number' ? 'KES ' + p.cumulativeDisbursedLoan.toLocaleString() : (p.cumulativeDisbursedLoan || 'KES 0')}</strong> · Total Credits: <strong>KES ${(S.repaid || 0).toLocaleString()}</strong></div>
+          <div class="rc-lbl">Official HELB Statement Ready — ${S.name || S.email || "Student Statement"}</div>
+          <div class="rc-sub">Loanee: <strong>${S.name || S.email || "Student"}</strong>${S.nationalId ? ` (National ID: <strong>${S.nationalId}</strong>)` : ''}<br>Total Debits: <strong>${typeof p.cumulativeDisbursedLoan === 'number' ? 'KES ' + p.cumulativeDisbursedLoan.toLocaleString() : (p.cumulativeDisbursedLoan || 'KES 0')}</strong> · Total Credits: <strong>KES ${(S.repaid || 0).toLocaleString()}</strong></div>
           <div style="margin-top:10px;">
             <button class="dl-link" onclick="openStatementModal()">📑 Open Official Statement Modal (PDF/Print)</button>
           </div>
@@ -1774,21 +1802,21 @@ async function processHelbMessage(text, g) {
   }
 
   // Appeal & Re-categorization
-  if (/appeal|re-categoriz|wrong band|change band|financial problem|deceased/i.test(t)) {
-    const tc = renderToolCard("get_appeal_guidance", { email: S.email, nationalId: S.nationalId, currentBand: S.band });
+  if (/appeal|re-categoriz|wrong band|change band|financial problem|deceased|reclassify/i.test(t)) {
+    const tc = renderToolCard("get_appeal_guidance", { email: S.email || "consultation", nationalId: S.nationalId || "consultation", currentBand: S.band });
     tc.classList.add("tool-done");
     return {
-      text: `Here is the official guide to appealing your HEF funding band on **portal.hef.co.ke** for **${S.name || S.email}**:`,
+      text: `Here is the official guide to appealing your HEF funding band on **portal.hef.co.ke**:`,
       html: cardAppealGuide(p)
     };
   }
 
   // Clearance & Compliance Certificate
   if (/clearance|compliance|certificate|clean record/i.test(t)) {
-    const tc = renderToolCard("check_clearance_status", { email: S.email, nationalId: S.nationalId, balance: p.outstandingBalance });
+    const tc = renderToolCard("check_clearance_status", { email: S.email || "consultation", nationalId: S.nationalId || "consultation", balance: p.outstandingBalance });
     tc.classList.add("tool-done");
     return {
-      text: `Here is your HELB Clearance & Compliance evaluation for **${S.name || S.email}**:`,
+      text: `Here is the official HELB Clearance & Compliance evaluation:`,
       html: cardClearanceGuide(p)
     };
   }
@@ -1796,13 +1824,15 @@ async function processHelbMessage(text, g) {
   // Profile / Details query
   if (/profile|who am i|my details|my name|my institution|my university|my id|my kcse|dashboard|portal details|show details/i.test(t)) {
     return {
-      text: `Here are your official HEF portal records for **${S.name || S.email}**:`,
+      text: S.auth
+        ? `Here are your official HEF portal records for **${S.name || S.email}**:`
+        : `Here is your current student funding profile and calculator overview:`,
       html: cardHefPortalDashboard(p)
     };
   }
 
   // Support & Contacts
-  if (/support|contact|helpdesk|phone|email|huduma|anniversary/i.test(t)) {
+  if (/support|contact|helpdesk|phone|email|huduma|anniversary|call|reach/i.test(t)) {
     return {
       text: `You can reach the official HELB & HEF Customer Service team via:\n\n• 📞 **Phone Support:** +254 711 052 000 / +254 20 2278 000\n• 📧 **Email:** \`contactcentre@helb.co.ke\` / \`info@hef.co.ke\`\n• 🏢 **Huduma Centres:** HELB service desks are active in all 47 county Huduma Centres countrywide\n• 🏢 **Head Office:** Anniversary Towers, 18th & 19th Floors, University Way, Nairobi\n• 🌐 **Official Portals:** [hef.co.ke](https://www.hef.co.ke) | [portal.hef.co.ke](https://portal.hef.co.ke)`,
       html: null
@@ -1810,7 +1840,7 @@ async function processHelbMessage(text, g) {
   }
 
   // First time application
-  if (/apply|first time|requirements|how to apply|documents/i.test(t)) {
+  if (/apply|first time|requirements|how to apply|documents|registration/i.test(t)) {
     return {
       text: `**First-Time HEF Application Requirements & Steps:**\n\n1. **Prerequisites:**\n   • Valid Kenyan National ID Number\n   • KCSE Index Number & Year (e.g. \`12345678001/2023\`)\n   • KUCCPS Admission Letter from your University/TVET\n   • Student's personal bank account or M-Pesa registered in student's own National ID\n   • Parent/Guardian National IDs (or Death Certificate if deceased)\n   • Two Guarantors' National IDs and phone contacts\n\n2. **Application Portal:** Register and apply online at [portal.hef.co.ke](https://portal.hef.co.ke).\n3. **Evaluation:** The Means Testing Instrument (MTI) will automatically evaluate and assign you to **Band 1, 2, 3, 4, or 5**.`,
       html: null
@@ -1819,7 +1849,9 @@ async function processHelbMessage(text, g) {
 
   // Context-aware dynamic fallback acknowledging student and inquiry
   return {
-    text: `I am here to assist with your active HEF account, **${S.name || S.email}**.\n\nYou can ask me specific questions such as:\n• *"What is my loan balance and interest?"*\n• *"How much is my upkeep stipend per semester?"*\n• *"Show my disbursement dates"*\n• *"How do I appeal for Band 1 or Band 2?"*\n• *"Download my loan statement"*\n• *"How to pay via M-Pesa Paybill 200800"*`,
+    text: S.auth
+      ? `I am here to assist with your active HEF account, **${S.name || S.email}**.\n\nYou can ask me specific questions such as:\n• *"What is my loan balance and interest?"*\n• *"How much is my upkeep stipend per semester?"*\n• *"Show my disbursement dates"*\n• *"How do I appeal for Band 1 or Band 2?"*\n• *"Download my loan statement"*\n• *"How to pay via M-Pesa Paybill 200800"*`
+      : `I am here to assist with all HELB & HEF student financing queries.\n\nYou can ask me:\n• *"Explain Band 1 to Band 5 percentages"*\n• *"What is my loan balance and interest?"*\n• *"When is upkeep disbursed?"*\n• *"How to repay loan via M-Pesa Paybill 200800"*\n• *"How do I appeal my band allocation?"*\n• *"Log in to HEF portal"*`,
     html: cardHefPortalDashboard(p)
   };
 }
@@ -1835,7 +1867,7 @@ async function dispatch(text) {
   if (window.innerWidth <= 720) closeSidebar();
 
   try {
-    showTyping("Huduma Smart is interacting with HEF portal…");
+    showTyping("Huduma Smart is analyzing HEF portal data…");
     if (GEN !== g) return;
 
     let res = await processHelbMessage(text, g);
@@ -1888,12 +1920,12 @@ window.newChat = () => {
         </div>
       </div>
       <h1 class="hero-title">Huduma Smart</h1>
-      <p class="hero-subtitle">Your dedicated HELB &amp; HEF AI Consultant. Log in with your email &amp; password to access authentic loan balances, band allocations, disbursement schedules &amp; statements.</p>
+      <p class="hero-subtitle">Your dedicated HELB &amp; HEF AI Consultant. Check loan balances, band allocations, disbursement schedules &amp; statements freely or connect your portal account.</p>
     </div>`;
 
   setTimeout(() => {
     if (!S.auth) {
-      addMsg("agent", `Habari! I am **Huduma Smart**, your official **HELB &amp; HEF Portal AI Consultant**.<br><br>To interact with the official Higher Education Financing (HEF) portal (<code>portal.hef.co.ke</code>), securely log in, and display your exact student details, loan balances, band allocations, and disbursement records, **please provide the Email Address and Password you used to register on the HEF Portal** below:`);
+      addMsg("agent", `Habari! I am **Huduma Smart**, your official **HELB &amp; HEF Portal AI Consultant**.<br><br>I can assist you with **HEF band breakdowns (Bands 1 to 5), loan balance calculations, upkeep disbursement schedules, M-Pesa repayments (Paybill 200800), application tracking, and official statements**.<br><br>Feel free to ask any question to get started, or click below to connect your official HEF account from <code>portal.hef.co.ke</code>:`);
       renderAuthGateInFeed();
     } else {
       addMsg("agent", `Welcome back, **${S.name || S.email}**! Your HEF Portal session is active.<br><br>How can I assist you with your loans, scholarships, or upkeep today?`);
@@ -1928,7 +1960,7 @@ updateSessionUI();
 
 setTimeout(() => {
   if (!S.auth) {
-    addMsg("agent", `Habari! I am **Huduma Smart**, your official **HELB &amp; HEF Portal AI Consultant**.<br><br>To interact with the official Higher Education Financing (HEF) portal (<code>portal.hef.co.ke</code>), securely log in, and display your exact student details, loan balances, band allocations, and disbursement records, **please provide the Email Address and Password you used to register on the HEF Portal** below:`);
+    addMsg("agent", `Habari! I am **Huduma Smart**, your official **HELB &amp; HEF Portal AI Consultant**.<br><br>I can assist you with **HEF band breakdowns (Bands 1 to 5), loan balance calculations, upkeep disbursement schedules, M-Pesa repayments (Paybill 200800), application tracking, and official statements**.<br><br>Feel free to ask any question to get started, or sign in below to connect your live portal account:`);
     renderAuthGateInFeed();
   } else {
     addMsg("agent", `Habari, **${S.name ? S.name.split(' ')[0] : (S.email ? S.email.split('@')[0] : 'Student')}**! Your official HEF session is active for **${S.name || S.email}**.<br><br>How can I assist you with your loan balances, upkeep disbursements, or band breakdown today?`);

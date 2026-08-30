@@ -107,6 +107,7 @@ async function checkPortalPlainHttpHealth(timeoutMs = 8000) {
         "Connection": "close",
       },
       timeout: timeoutMs,
+      rejectUnauthorized: false,
     };
     if (proxyConfig?.httpsAgent) {
       options.agent = proxyConfig.httpsAgent;
@@ -822,7 +823,8 @@ async function httpGetPortalPage(pageUrl, cookieHeader, timeoutMs = 8000) {
         "Referer": "https://portal.hef.co.ke/",
         "Connection": "keep-alive"
       },
-      timeout: timeoutMs
+      timeout: timeoutMs,
+      rejectUnauthorized: false
     };
     if (proxyConfig?.httpsAgent) {
       options.agent = proxyConfig.httpsAgent;
@@ -920,6 +922,7 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
       console.log(`[direct-auth] Routing direct request through proxy: ${proxyConfig.server}`);
     }
 
+    const isId = /^\d{5,10}$/.test(credential.trim());
     const getOptions = {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -927,7 +930,8 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
         "Accept-Language": "en-US,en;q=0.9",
         "Connection": "keep-alive"
       },
-      timeout: timeoutMs
+      timeout: timeoutMs,
+      rejectUnauthorized: false
     };
     if (proxyConfig?.httpsAgent) {
       getOptions.agent = proxyConfig.httpsAgent;
@@ -940,7 +944,7 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
       const postData = querystring.stringify({
         base_url: "https://portal.hef.co.ke/",
         user_type: "",
-        user_number: "",
+        user_number: isId ? credential.trim() : "",
         email_add: credential.trim(),
         password: password
       });
@@ -957,7 +961,8 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
           "Origin": "https://portal.hef.co.ke",
           "Accept": "*/*"
         },
-        timeout: timeoutMs
+        timeout: timeoutMs,
+        rejectUnauthorized: false
       };
       if (proxyConfig?.httpsAgent) {
         reqOptions.agent = proxyConfig.httpsAgent;
@@ -1308,6 +1313,8 @@ async function playwrightHefLogin(email, password) {
     locale: "en-KE",
     timezoneId: "Africa/Nairobi",
     extraHTTPHeaders: { "Accept-Language": "en-KE,en;q=0.9,en-US;q=0.8" },
+    ignoreHTTPSErrors: true,
+    bypassCSP: true,
   });
 
   const page = await ctx.newPage();

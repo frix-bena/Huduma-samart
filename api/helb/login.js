@@ -39,12 +39,14 @@ function isNetworkError(err) {
 
 async function directHefLogin(credential, password) {
   return new Promise((resolve) => {
+    const isId = /^\d{5,10}$/.test(credential.trim());
     const req1 = https.get(PORTAL_BASE_URL, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
-      timeout: 15000
+      timeout: 15000,
+      rejectUnauthorized: false
     }, (res1) => {
       const rawCookies = res1.headers["set-cookie"] || [];
       const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
@@ -52,7 +54,7 @@ async function directHefLogin(credential, password) {
       const postData = querystring.stringify({
         base_url: "https://portal.hef.co.ke/",
         user_type: "",
-        user_number: "",
+        user_number: isId ? credential.trim() : "",
         email_add: credential.trim(),
         password: password
       });
@@ -67,7 +69,8 @@ async function directHefLogin(credential, password) {
           "X-Requested-With": "XMLHttpRequest",
           "Referer": "https://portal.hef.co.ke/"
         },
-        timeout: 15000
+        timeout: 15000,
+        rejectUnauthorized: false
       }, (res2) => {
         let body = "";
         res2.on("data", chunk => body += chunk);
@@ -157,7 +160,8 @@ async function httpGetPortalPage(pageUrl, cookieHeader, timeoutMs = 8000) {
         "Referer": "https://portal.hef.co.ke/",
         "Connection": "keep-alive"
       },
-      timeout: timeoutMs
+      timeout: timeoutMs,
+      rejectUnauthorized: false
     };
     const req = https.get(pageUrl, options, (res) => {
       let body = "";
