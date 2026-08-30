@@ -887,12 +887,41 @@ async function scrapeHefPortalSession(
 
   // Sub-routes that humans visit to access student details, allocations, statements, and clearance
   const portalSubPages = [
-    { name: "Profile & Personal Details", url: `${PORTAL_BASE_URL}/account/index/frm_profile`, menuLink: 'a[href*="frm_profile"], a:has-text("My Card"), a:has-text("Profile")' },
-    { name: "Academic & Institution Details", url: `${PORTAL_BASE_URL}/nfm/index/frm_update_details`, menuLink: 'a[href*="frm_update_details"], a:has-text("Update Profile")' },
-    { name: "My Loans & Scholarships", url: `${PORTAL_BASE_URL}/service/index/frm_loans`, menuLink: 'a[href*="frm_loans"], a:has-text("My Loans")' },
-    { name: "HELB Loan Statement & Ledger", url: `${PORTAL_BASE_URL}/service/index/frm_loan_statement`, menuLink: 'a[href*="frm_loan_statement"], a:has-text("Loan Statement")' },
-    { name: "Loan Repayment & Paybill", url: `${PORTAL_BASE_URL}/service/index/frm_loan_repayment`, menuLink: 'a[href*="frm_loan_repayment"], a:has-text("Loan Repayment")' },
-    { name: "Clearance & Compliance", url: `${PORTAL_BASE_URL}/service/index/frm_clr_cert`, menuLink: 'a[href*="frm_clr_cert"], a:has-text("Clearance Certificate")' }
+    {
+      name: "Profile & Personal Details",
+      url: `${PORTAL_BASE_URL}/account/index/frm_profile`,
+      menuLink: 'a[href*="frm_profile"], a:has-text("My Card"), a:has-text("Profile")',
+      parentMenu: "My Account"
+    },
+    {
+      name: "Academic & Institution Details",
+      url: `${PORTAL_BASE_URL}/nfm/index/frm_update_details`,
+      menuLink: 'a[href*="frm_update_details"], a[href*="frm_kuccps_details"], a:has-text("Update Institutions"), a:has-text("Update Profile")',
+      parentMenu: "My Profile"
+    },
+    {
+      name: "My Loans & Scholarships",
+      url: `${PORTAL_BASE_URL}/service/index/frm_loans`,
+      menuLink: 'a[href*="frm_loans"], a:has-text("My Loans")'
+    },
+    {
+      name: "HELB Loan Statement & Ledger",
+      url: `${PORTAL_BASE_URL}/service/index/frm_loan_statement`,
+      menuLink: 'a[href*="frm_loan_statement"], a:has-text("Loan Statement")',
+      parentMenu: "Self Serve"
+    },
+    {
+      name: "Loan Repayment & Paybill",
+      url: `${PORTAL_BASE_URL}/service/index/frm_loan_repayment`,
+      menuLink: 'a[href*="frm_loan_repayment"], a:has-text("Loan Repayment")',
+      parentMenu: "Self Serve"
+    },
+    {
+      name: "Clearance & Compliance",
+      url: `${PORTAL_BASE_URL}/service/index/frm_clr_cert`,
+      menuLink: 'a[href*="frm_clr_cert"], a[href*="frm_comp_cert"], a:has-text("Clearance Certificate"), a:has-text("Compliance Certificate")',
+      parentMenu: "Self Serve"
+    }
   ];
 
   console.log("[playwright-scraper] Initiating human browsing of portal sub-routes to extract full student financing records…");
@@ -901,8 +930,27 @@ async function scrapeHefPortalSession(
       console.log(`[playwright-scraper] 🖱️ Human navigating to: ${subPage.name}…`);
       
       let navigatedViaClick = false;
-      const linkLoc = page.locator(subPage.menuLink).first();
-      if (await linkLoc.isVisible({ timeout: 600 }).catch(() => false)) {
+      let linkLoc = page.locator(subPage.menuLink).first();
+      let isVisible = await linkLoc.isVisible({ timeout: 600 }).catch(() => false);
+
+      // If the target link is under "Self Serve" (or another submenu) and not yet visible, expand the parent menu
+      if (!isVisible && subPage.parentMenu) {
+        console.log(`[playwright-scraper] Sub-menu link not visible. Expanding parent menu "${subPage.parentMenu}"…`);
+        const parentLoc = page.locator(
+          `li.has-sub:has-text("${subPage.parentMenu}") > a, a:has-text("${subPage.parentMenu}"), span.menu-title:has-text("${subPage.parentMenu}")`
+        ).first();
+
+        if (await parentLoc.isVisible({ timeout: 1000 }).catch(() => false)) {
+          await human.humanClick(page, parentLoc, mousePos);
+          await human.humanPause(300, 600); // Brief wait for accordion animation
+        }
+
+        // Re-locate and check visibility after expanding parent menu
+        linkLoc = page.locator(subPage.menuLink).first();
+        isVisible = await linkLoc.isVisible({ timeout: 1000 }).catch(() => false);
+      }
+
+      if (isVisible) {
         navigatedViaClick = await human.humanClick(page, linkLoc, mousePos);
       }
 

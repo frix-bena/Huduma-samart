@@ -481,6 +481,98 @@ async function runTests() {
     await testBrowser.close();
   });
 
+  await asyncTest("Sidebar navigation accurately locates items and expands Self Serve submenu", async () => {
+    const testBrowser = await chromium.launch({ headless: true });
+    const testCtx = await testBrowser.newContext();
+    const testPage = await testCtx.newPage();
+
+    const sidebarHtml = `
+      <!DOCTYPE html>
+      <html>
+        <body>
+          <div class="main-menu">
+            <ul class="navigation">
+              <li class="nav-item"><a href="/account/index"><span class="menu-title">Dashboard</span></a></li>
+              <li class="nav-item has-sub">
+                <a href="javascript:void(0);" id="my-account-parent"><span class="menu-title">My Account</span></a>
+                <ul class="menu-content" id="my-account-menu" style="display: none;">
+                  <li><a class="menu-item" href="/account/index/frm_profile">My Card</a></li>
+                </ul>
+              </li>
+              <li class="nav-item">
+                <a href="/nfm/index/frm_kuccps_details"><span class="menu-title">Update Institutions</span></a>
+              </li>
+              <li class="nav-item">
+                <a href="/service/index/frm_loans"><span class="menu-title">My Loans</span></a>
+              </li>
+              <li class="nav-item has-sub" id="self-serve-li">
+                <a href="javascript:void(0);" id="self-serve-parent" onclick="document.getElementById('self-serve-menu').style.display='block';"><span class="menu-title">Self Serve</span></a>
+                <ul class="menu-content" id="self-serve-menu" style="display: none;">
+                  <li><a class="menu-item" href="/service/index/frm_loan_statement">Loan Statement</a></li>
+                  <li><a class="menu-item" href="/service/index/frm_clr_cert">Clearance Certificate</a></li>
+                  <li><a class="menu-item" href="/service/index/frm_loan_repayment">Loan Repayment</a></li>
+                </ul>
+              </li>
+            </ul>
+          </div>
+        </body>
+      </html>
+    `;
+
+    await testPage.setContent(sidebarHtml);
+
+    const portalSubPages = [
+      {
+        name: "Academic & Institution Details",
+        url: "https://portal.hef.co.ke/nfm/index/frm_update_details",
+        menuLink: 'a[href*="frm_update_details"], a[href*="frm_kuccps_details"], a:has-text("Update Institutions"), a:has-text("Update Profile")',
+        parentMenu: "My Profile"
+      },
+      {
+        name: "My Loans & Scholarships",
+        url: "https://portal.hef.co.ke/service/index/frm_loans",
+        menuLink: 'a[href*="frm_loans"], a:has-text("My Loans")'
+      },
+      {
+        name: "HELB Loan Statement & Ledger",
+        url: "https://portal.hef.co.ke/service/index/frm_loan_statement",
+        menuLink: 'a[href*="frm_loan_statement"], a:has-text("Loan Statement")',
+        parentMenu: "Self Serve"
+      },
+      {
+        name: "Loan Repayment & Paybill",
+        url: "https://portal.hef.co.ke/service/index/frm_loan_repayment",
+        menuLink: 'a[href*="frm_loan_repayment"], a:has-text("Loan Repayment")',
+        parentMenu: "Self Serve"
+      },
+      {
+        name: "Clearance & Compliance",
+        url: "https://portal.hef.co.ke/service/index/frm_clr_cert",
+        menuLink: 'a[href*="frm_clr_cert"], a[href*="frm_comp_cert"], a:has-text("Clearance Certificate"), a:has-text("Compliance Certificate")',
+        parentMenu: "Self Serve"
+      }
+    ];
+
+    // Top-level "Update Institutions" link is directly visible
+    const instLink = testPage.locator(portalSubPages[0].menuLink).first();
+    assert.strictEqual(await instLink.isVisible(), true, "Update Institutions link should be visible");
+
+    // "Self Serve" sub-link (Loan Statement) is initially hidden
+    let stmtLink = testPage.locator(portalSubPages[2].menuLink).first();
+    assert.strictEqual(await stmtLink.isVisible(), false, "Loan Statement link should initially be hidden in collapsed menu");
+
+    // Expand Self Serve parent
+    const selfServeParent = testPage.locator(`li.has-sub:has-text("Self Serve") > a, a:has-text("Self Serve")`).first();
+    assert.strictEqual(await selfServeParent.isVisible(), true, "Self Serve parent menu should be visible");
+    await selfServeParent.click();
+
+    // Now Loan Statement sub-link is visible
+    stmtLink = testPage.locator(portalSubPages[2].menuLink).first();
+    assert.strictEqual(await stmtLink.isVisible(), true, "Loan Statement link should be visible after Self Serve expands");
+
+    await testBrowser.close();
+  });
+
   // ─────────────────────────────────────────────────────────────────────────
   // SUMMARY
   // ─────────────────────────────────────────────────────────────────────────
