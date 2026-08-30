@@ -16,6 +16,7 @@ const fs = require("fs-extra");
 const { chromium } = require("playwright-extra");
 const stealth = require("puppeteer-extra-plugin-stealth")();
 const hefEngine = require("./hefEngine");
+const human = require("./humanInteraction");
 
 // Apply stealth plugin for Playwright
 chromium.use(stealth);
@@ -511,12 +512,60 @@ async function scrapeDashboardFromPage(page) {
     extractionAudit
   );
 
-  // 20. Table Rows / Disbursements
+  // 20. Phone / Mobile Number
+  const phone = await scrapeFieldByLabels(page, "phone",
+    ["Mobile Number", "Phone Number", "Mobile", "Phone", "Telephone", "Cell"],
+    ["input#usermobile", "input[name='usermobile']", "input#mobile", "input[name='mobile']", ".user-mobile", "#usermobile"],
+    extractionAudit
+  );
+
+  // 21. Email Address
+  const studentEmail = await scrapeFieldByLabels(page, "email",
+    ["Email Address", "Email", "E-mail"],
+    ["input#email", "input[name='email']", "input#email_add", ".user-email"],
+    extractionAudit
+  );
+
+  // 22. Location Details (County, Sub-County, Constituency)
+  const county = await scrapeFieldByLabels(page, "county",
+    ["County", "Home County", "County of Origin"],
+    ["input#county", "select#county", ".county-name", "#county"],
+    extractionAudit
+  );
+  const subCounty = await scrapeFieldByLabels(page, "subCounty",
+    ["Sub County", "Sub-County", "District"],
+    ["input#sub_county", "select#sub_county", ".sub-county", "#sub_county"],
+    extractionAudit
+  );
+  const constituency = await scrapeFieldByLabels(page, "constituency",
+    ["Constituency", "Home Constituency"],
+    ["input#constituency", "select#constituency", ".constituency-name", "#constituency"],
+    extractionAudit
+  );
+
+  // 23. Personal Identification (DOB, Gender, Registration/Admission No)
+  const dob = await scrapeFieldByLabels(page, "dob",
+    ["Date of Birth", "DOB", "Birth Date"],
+    ["input#dob", "input[name='dob']", "input#date_of_birth", ".dob"],
+    extractionAudit
+  );
+  const gender = await scrapeFieldByLabels(page, "gender",
+    ["Gender", "Sex"],
+    ["input#gender", "select#gender", ".gender"],
+    extractionAudit
+  );
+  const registrationNumber = await scrapeFieldByLabels(page, "registrationNumber",
+    ["Registration Number", "Reg No", "Admission Number", "Adm No", "Student ID"],
+    ["input#reg_no", "input#adm_no", ".reg-no", ".adm-no"],
+    extractionAudit
+  );
+
+  // 24. Table Rows / Disbursements
   const disbursements = [];
   try {
-    const tableRows = page.locator('table tbody tr, .table tbody tr, #disbursements-table tr');
+    const tableRows = page.locator('table tbody tr, .table tbody tr, #disbursements-table tr, #big_table2 tbody tr');
     const rowCount = await tableRows.count().catch(() => 0);
-    for (let i = 0; i < Math.min(rowCount, 20); i++) {
+    for (let i = 0; i < Math.min(rowCount, 25); i++) {
       const row = tableRows.nth(i);
       const cells = await row.locator('td').allInnerTexts().catch(() => []);
       if (cells && cells.length >= 3) {
@@ -537,6 +586,8 @@ async function scrapeDashboardFromPage(page) {
   const scrapedPayload = {
     name,
     nationalId,
+    email: studentEmail,
+    phone,
     kcseIndex,
     institution,
     programme,
@@ -550,6 +601,12 @@ async function scrapeDashboardFromPage(page) {
     applicationStatus,
     bankName,
     accountNumber,
+    county,
+    subCounty,
+    constituency,
+    dob,
+    gender,
+    registrationNumber,
     outstandingDue,
     loanAwarded,
     scholarshipAmount,
@@ -773,7 +830,7 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
 // ─────────────────────────────────────────────────────────────────────────────
 async function playwrightHefLogin(email, password) {
   const isDebugVisible = process.env.DEBUG_VISIBLE === "true";
-  console.log(`[playwright-login] Starting Playwright browser (visible: ${isDebugVisible}) for user: ${email}…`);
+  console.log(`[playwright-login] Starting human-simulated Playwright browser (visible: ${isDebugVisible}) for user: ${email}…`);
 
   const browser = await chromium.launch({
     headless: !isDebugVisible,
@@ -795,18 +852,18 @@ async function playwrightHefLogin(email, password) {
       "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
     locale: "en-KE",
     timezoneId: "Africa/Nairobi",
-    extraHTTPHeaders: { "Accept-Language": "en-KE,en;q=0.9" },
+    extraHTTPHeaders: { "Accept-Language": "en-KE,en;q=0.9,en-US;q=0.8" },
   });
 
   const page = await ctx.newPage();
 
-  // Remove webdriver flag
-  await page.addInitScript(() => {
-    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-  });
+  // Inject anti-bot human stealth overrides
+  await human.setupHumanStealth(page);
+
+  // Track human mouse cursor position across actions
+  const mousePos = { x: human.randInt(150, 400), y: human.randInt(120, 300) };
 
   // ── 1. INTERCEPT INTERNAL HEF API RESPONSES ──
-  // Before triggering login or navigating to dashboard, attach response listener
   let capturedProfileData = {};
   let capturedAllocationData = {};
   const capturedResponses = [];
@@ -815,10 +872,9 @@ async function playwrightHefLogin(email, password) {
     const url = response.url();
     const contentType = response.headers()['content-type'] || '';
     
-    if (contentType.includes('application/json') || url.includes('/api/') || url.includes('.json')) {
+    if (contentType.includes('application/json') || url.includes('/api/') || url.includes('.json') || url.includes('frm_') || url.includes('datatable')) {
       try {
         const json = await response.json();
-        // Log endpoint for debugging
         console.log(`[playwright-network] Captured API [${response.status()}]:`, url);
         capturedResponses.push({ url, status: response.status(), data: json });
         
@@ -838,7 +894,7 @@ async function playwrightHefLogin(email, password) {
   });
 
   try {
-    console.log(`[playwright-login] Navigating to ${PORTAL_BASE_URL}…`);
+    console.log(`[playwright-login] Navigating to ${PORTAL_BASE_URL} with human pacing…`);
 
     let navOk = false;
     for (let attempt = 1; attempt <= 2; attempt++) {
@@ -848,7 +904,7 @@ async function playwrightHefLogin(email, password) {
         break;
       } catch (err) {
         console.warn(`[playwright-login] ⚠️ Navigation attempt ${attempt} warning: ${err.message}`);
-        if (attempt === 1) await page.waitForTimeout(2000);
+        if (attempt === 1) await human.humanPause(1500, 3000);
       }
     }
 
@@ -863,8 +919,11 @@ async function playwrightHefLogin(email, password) {
       };
     }
 
+    // Human pause to view login page
+    await human.humanPause(600, 1200);
+
     // 1. Locate the Email / ID field
-    console.log("[playwright-login] Locating credential and password fields…");
+    console.log("[playwright-login] Locating credential and password fields with human movement…");
     const emailSelector = '#form-email_add, input[name="email_add"], input[placeholder*="email or ID" i], input[name="email"], input[id*="email" i]';
     const emailLocator = page.locator(emailSelector).first();
     await emailLocator.waitFor({ state: "visible", timeout: 25000 });
@@ -874,18 +933,15 @@ async function playwrightHefLogin(email, password) {
     const passwordLocator = page.locator(passSelector).first();
     await passwordLocator.waitFor({ state: "visible", timeout: 15000 });
 
-    // 3. Fill credentials
-    await emailLocator.click();
-    await emailLocator.fill("");
-    await emailLocator.type(email, { delay: 100 });
-    await page.waitForTimeout(150);
+    // 3. Human typing for credentials
+    console.log("[playwright-login] Entering user credentials with human keystroke cadence…");
+    await human.humanType(page, emailLocator, email, mousePos, { clearFirst: true });
+    await human.humanPause(150, 400);
 
-    await passwordLocator.click();
-    await passwordLocator.fill("");
-    await passwordLocator.type(password, { delay: 100 });
-    await page.waitForTimeout(200);
+    await human.humanType(page, passwordLocator, password, mousePos, { clearFirst: true });
+    await human.humanPause(200, 500);
 
-    // 4. Locate and click Login button
+    // 4. Locate and human-click Login button
     const submitBtn = page.locator('.btn-signin, #form-login button[type="submit"], button:has-text("Login")').first();
 
     let ajaxResponseData = null;
@@ -898,8 +954,8 @@ async function playwrightHefLogin(email, password) {
       } catch (_) {}
     }).catch(() => null);
 
-    console.log("[playwright-login] Submitting credentials to portal…");
-    await submitBtn.click();
+    console.log("[playwright-login] Clicking login button with Bézier mouse curve…");
+    await human.humanClick(page, submitBtn, mousePos);
 
     await Promise.race([
       responsePromise,
@@ -907,7 +963,7 @@ async function playwrightHefLogin(email, password) {
     ]);
 
     // Check if portal displayed error in DOM
-    await page.waitForTimeout(800);
+    await human.humanPause(400, 800);
     const msgEl = page.locator('.message, .alert-danger, #msg, .toastr').first();
     if (await msgEl.isVisible({ timeout: 2000 }).catch(() => false)) {
       const errorText = await msgEl.textContent().catch(() => "");
@@ -940,50 +996,53 @@ async function playwrightHefLogin(email, password) {
     // Wait for redirect to portal application dashboard
     await page.waitForURL(url => !url.toString().includes("auth/signin") && !url.toString().endsWith(".ke/"), { timeout: 15000 }).catch(() => {});
     await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
-    await page.waitForTimeout(3000); // Give React/Angular SPA time to render DOM and trigger background APIs
+    
+    // Human-like reading pause and smooth scrolling on initial dashboard
+    await human.humanPause(1200, 2400);
+    await human.humanScroll(page, 350);
 
-    // ── 2. SUB-ROUTE NAVIGATION & INTERACTION (If tabs exist) ──
+    // ── 2. SYSTEMATIC HUMAN EXPLORATION OF HEF PORTAL SUB-ROUTES ──
     let accumulatedPageText = "";
     try {
       const initialText = await page.locator("body").innerText().catch(async () => await page.evaluate(() => document.body.innerText).catch(() => ""));
       if (initialText) accumulatedPageText += "\n" + initialText;
     } catch (_) {}
 
-    const tabsToVisit = [
-      'text="Application Status"',
-      'text="Allocations"',
-      'text="Allocation"',
-      'text="Profile"',
-      'text="Disbursement"',
-      'text="Disbursements"',
-      'text="Loan Details"',
-      'text="Statement"',
-      'a:has-text("Application Status")',
-      'a:has-text("Allocations")',
-      'a:has-text("Allocation")',
-      'a:has-text("Profile")',
-      'a:has-text("Disbursement")',
-      'a:has-text("Disbursements")',
-      'a:has-text("Statement")',
-      'a[href*="application" i]',
-      'a[href*="allocation" i]',
-      'a[href*="profile" i]',
-      'a[href*="disbursement" i]',
-      'a[href*="statement" i]'
+    // Sub-routes that humans visit to access student details, allocations, statements, and clearance
+    const portalSubPages = [
+      { name: "Profile & Personal Details", url: `${PORTAL_BASE_URL}/account/index/frm_profile`, menuLink: 'a[href*="frm_profile"], a:has-text("My Card"), a:has-text("Profile")' },
+      { name: "Academic & Institution Details", url: `${PORTAL_BASE_URL}/nfm/index/frm_update_details`, menuLink: 'a[href*="frm_update_details"], a:has-text("Update Profile")' },
+      { name: "My Loans & Scholarships", url: `${PORTAL_BASE_URL}/service/index/frm_loans`, menuLink: 'a[href*="frm_loans"], a:has-text("My Loans")' },
+      { name: "HELB Loan Statement & Ledger", url: `${PORTAL_BASE_URL}/service/index/frm_loan_statement`, menuLink: 'a[href*="frm_loan_statement"], a:has-text("Loan Statement")' },
+      { name: "Loan Repayment & Paybill", url: `${PORTAL_BASE_URL}/service/index/frm_loan_repayment`, menuLink: 'a[href*="frm_loan_repayment"], a:has-text("Loan Repayment")' },
+      { name: "Clearance & Compliance", url: `${PORTAL_BASE_URL}/service/index/frm_clr_cert`, menuLink: 'a[href*="frm_clr_cert"], a:has-text("Clearance Certificate")' }
     ];
 
-    console.log("[playwright-scraper] Probing navigation sub-routes and tabs for deep data interception…");
-    for (const tabSelector of tabsToVisit) {
+    console.log("[playwright-scraper] Initiating human browsing of portal sub-routes to extract full student financing records…");
+    for (const subPage of portalSubPages) {
       try {
-        const tab = page.locator(tabSelector).first();
-        if (await tab.isVisible({ timeout: 500 }).catch(() => false)) {
-          console.log(`[playwright-scraper] Visiting tab: ${tabSelector}`);
-          await tab.click().catch(() => {});
-          await page.waitForTimeout(2000); // Allow API response to trigger & DOM to render
-          const tabText = await page.locator("body").innerText().catch(async () => await page.evaluate(() => document.body.innerText).catch(() => ""));
-          if (tabText) accumulatedPageText += "\n" + tabText;
+        console.log(`[playwright-scraper] 🖱️ Human navigating to: ${subPage.name}…`);
+        
+        let navigatedViaClick = false;
+        const linkLoc = page.locator(subPage.menuLink).first();
+        if (await linkLoc.isVisible({ timeout: 600 }).catch(() => false)) {
+          navigatedViaClick = await human.humanClick(page, linkLoc, mousePos);
         }
-      } catch (_) {}
+
+        if (!navigatedViaClick) {
+          await page.goto(subPage.url, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+        }
+
+        await page.waitForLoadState("networkidle", { timeout: 6000 }).catch(() => {});
+        await human.humanPause(800, 1500); // Human reading delay
+        await human.humanScroll(page, 400); // Human scrolling to view table/form data
+
+        // Collect page text for regex parsing
+        const pageText = await page.locator("body").innerText().catch(async () => await page.evaluate(() => document.body.innerText).catch(() => ""));
+        if (pageText) accumulatedPageText += "\n" + pageText;
+      } catch (subErr) {
+        console.warn(`[playwright-scraper] Sub-page navigation notice for ${subPage.name}:`, subErr.message);
+      }
     }
 
     // Check session cookies
@@ -1002,6 +1061,8 @@ async function playwrightHefLogin(email, password) {
     const scrapedData = {
       name: apiData.name || domData.name || regexData.name || null,
       nationalId: apiData.nationalId || domData.nationalId || regexData.nationalId || (/^\d{5,10}$/.test(email) ? email : null) || null,
+      email: apiData.email || domData.email || (email && email.includes("@") ? email : null) || null,
+      phone: apiData.phone || domData.phone || regexData.phone || null,
       kcseIndex: apiData.kcseIndex || domData.kcseIndex || regexData.kcseIndex || null,
       institution: apiData.institution || domData.institution || regexData.institution || null,
       programme: apiData.programme || domData.programme || regexData.programme || null,
@@ -1020,6 +1081,12 @@ async function playwrightHefLogin(email, password) {
       academicYear: apiData.academicYear || domData.academicYear || regexData.academicYear || null,
       bankName: apiData.bankName || domData.bankName || regexData.bankName || null,
       accountNumber: apiData.accountNumber || domData.accountNumber || regexData.accountNumber || null,
+      county: apiData.county || domData.county || regexData.county || null,
+      subCounty: apiData.subCounty || domData.subCounty || regexData.subCounty || null,
+      constituency: apiData.constituency || domData.constituency || regexData.constituency || null,
+      dob: apiData.dob || domData.dob || regexData.dob || null,
+      gender: apiData.gender || domData.gender || regexData.gender || null,
+      registrationNumber: apiData.registrationNumber || domData.registrationNumber || regexData.registrationNumber || null,
       applicationStatus: apiData.applicationStatus || domData.applicationStatus || regexData.applicationStatus || null,
       applicationRef: apiData.applicationRef || domData.applicationRef || regexData.applicationRef || null,
       disbursements: (apiData.disbursements && apiData.disbursements.length > 0) ? apiData.disbursements : (domData.disbursements && domData.disbursements.length > 0 ? domData.disbursements : []),
@@ -1029,7 +1096,7 @@ async function playwrightHefLogin(email, password) {
 
     const integrity = hefEngine.evaluateDataIntegrity(scrapedData, domData.extractionAudit);
 
-    console.log("[playwright-login] ✅ Deep scraping completed. Final verified attributes:", JSON.stringify({
+    console.log("[playwright-login] ✅ Human-like deep scraping completed. Final verified attributes:", JSON.stringify({
       name: scrapedData.name || "Data not found",
       nationalId: scrapedData.nationalId || "Data not found",
       institution: scrapedData.institution || "Data not found",
@@ -1151,6 +1218,13 @@ function buildResponseProfile(scraped = {}, reqBody = {}, userIdentifier = "") {
     name,
     nationalId,
     email,
+    phone: s.phone || reqBody.phone || null,
+    county: s.county || reqBody.county || null,
+    subCounty: s.subCounty || reqBody.subCounty || null,
+    constituency: s.constituency || reqBody.constituency || null,
+    dob: s.dob || reqBody.dob || null,
+    gender: s.gender || reqBody.gender || null,
+    registrationNumber: s.registrationNumber || reqBody.registrationNumber || null,
     institution,
     programme,
     level,

@@ -28,6 +28,12 @@ const S = {
   academicYear: "",
   bankName: "",
   accountNumber: "",
+  county: "",
+  subCounty: "",
+  constituency: "",
+  dob: "",
+  gender: "",
+  registrationNumber: "",
   repaid: 0,
   penalty: 0,
   outstandingBalance: null,
@@ -684,6 +690,12 @@ async function performLogin(email, password) {
       S.academicYear = p.student?.academicYear || S.academicYear || "";
       S.bankName = p.student?.bankName || S.bankName || "";
       S.accountNumber = p.student?.accountNumber || S.accountNumber || "";
+      S.county = p.student?.county || S.county || "";
+      S.subCounty = p.student?.subCounty || S.subCounty || "";
+      S.constituency = p.student?.constituency || S.constituency || "";
+      S.dob = p.student?.dob || S.dob || "";
+      S.gender = p.student?.gender || S.gender || "";
+      S.registrationNumber = p.student?.registrationNumber || S.registrationNumber || "";
       S.repaid = p.funding?.cumulative?.repaid !== undefined ? p.funding.cumulative.repaid : (S.repaid || 0);
       S.penalty = p.funding?.cumulative?.penalty !== undefined ? p.funding.cumulative.penalty : (S.penalty || 0);
       S.outstandingBalance = p.funding?.cumulative?.outstandingBalance !== undefined ? p.funding.cumulative.outstandingBalance : S.outstandingBalance;
@@ -732,6 +744,12 @@ function logout() {
   S.currentSemester = null;
   S.bankName = "";
   S.accountNumber = "";
+  S.county = "";
+  S.subCounty = "";
+  S.constituency = "";
+  S.dob = "";
+  S.gender = "";
+  S.registrationNumber = "";
   S.repaid = 0;
   S.penalty = 0;
   S.outstandingBalance = null;
@@ -927,6 +945,7 @@ function cardHefPortalDashboard(p) {
           <div class="hef-student-meta">
             ${S.nationalId ? `<span>National ID: <strong style="font-family:'JetBrains Mono',monospace;color:var(--blue);">${S.nationalId}</strong></span>` : ''}
             ${S.kcseIndex ? `<span>• KCSE Index: <strong style="font-family:'JetBrains Mono',monospace;">${S.kcseIndex}</strong></span>` : ''}
+            ${S.phone ? `<span>• Tel: <strong style="font-family:'JetBrains Mono',monospace;">${S.phone}</strong></span>` : ''}
             ${S.email ? `<span>• <code>${S.email}</code></span>` : ''}
           </div>
         </div>
@@ -937,12 +956,14 @@ function cardHefPortalDashboard(p) {
 
       <div class="hef-grid-2">
         <div class="hef-card-block">
-          <div class="hef-block-title">🏫 Academic Placement</div>
+          <div class="hef-block-title">🏫 Academic &amp; Personal Details</div>
           <div class="hef-detail-row"><span class="lbl">Institution:</span> <span class="val"><strong>${S.institution || "Not retrieved from portal / Not provided"}</strong></span></div>
           <div class="hef-detail-row"><span class="lbl">Programme:</span> <span class="val"><strong>${S.programme || "Not retrieved from portal / Not provided"}</strong></span></div>
           <div class="hef-detail-row"><span class="lbl">Study Level:</span> <span class="val">${S.level || "Undergraduate"}</span></div>
           <div class="hef-detail-row"><span class="lbl">Current Stage:</span> <span class="val">${S.yearOfStudy ? `Year ${S.yearOfStudy}${S.currentSemester ? `, Semester ${S.currentSemester}` : ''}` : "Active Student"}</span></div>
           <div class="hef-detail-row"><span class="lbl">Academic Year:</span> <span class="val">${S.academicYear || "Not recorded on portal"}</span></div>
+          ${S.county ? `<div class="hef-detail-row"><span class="lbl">County / Home:</span> <span class="val">${S.county}${S.subCounty ? `, ${S.subCounty}` : ''}</span></div>` : ''}
+          ${S.registrationNumber ? `<div class="hef-detail-row"><span class="lbl">Student Reg No:</span> <span class="val"><code>${S.registrationNumber}</code></span></div>` : ''}
         </div>
 
         <div class="hef-card-block">

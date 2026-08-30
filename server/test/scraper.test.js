@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { chromium } = require("playwright");
 const hefEngine = require("../hefEngine");
+const human = require("../humanInteraction");
 
 // Scraper functions from index.js (or re-implemented matching index.js for unit testing)
 function sanitizeText(str) {
@@ -418,6 +419,66 @@ async function runTests() {
     assert.strictEqual(profile.funding.band, null);
     assert.strictEqual(profile.funding.cumulative.outstandingBalance, null);
     assert.deepStrictEqual(profile.disbursements, []);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // TEST GROUP 6: Human Browser Interaction & Stealth Engine
+  // ─────────────────────────────────────────────────────────────────────────
+  console.log("\n--- Test Group 6: Human Browser Interaction & Stealth Engine ---");
+
+  test("Bézier mouse path generates smooth multi-point trajectories with correct endpoints", () => {
+    const startX = 100, startY = 150;
+    const targetX = 650, targetY = 420;
+    const pathPoints = human.generateBezierPath(startX, startY, targetX, targetY, 20);
+
+    assert.ok(Array.isArray(pathPoints) && pathPoints.length >= 10, "Trajectory must contain at least 10 intermediate points");
+    const firstPoint = pathPoints[0];
+    const lastPoint = pathPoints[pathPoints.length - 1];
+
+    assert.strictEqual(Math.round(firstPoint.x), startX, "Trajectory start X must match");
+    assert.strictEqual(Math.round(firstPoint.y), startY, "Trajectory start Y must match");
+    assert.strictEqual(Math.round(lastPoint.x), targetX, "Trajectory target X must match");
+    assert.strictEqual(Math.round(lastPoint.y), targetY, "Trajectory target Y must match");
+  });
+
+  test("Random range and Gaussian utilities generate realistic human timing parameters", () => {
+    for (let i = 0; i < 50; i++) {
+      const rInt = human.randInt(50, 150);
+      assert.ok(rInt >= 50 && rInt <= 150, "randInt must stay within specified bounds");
+
+      const rGauss = human.randGaussian(100, 20);
+      assert.ok(typeof rGauss === "number" && !isNaN(rGauss), "randGaussian must return valid numbers");
+    }
+  });
+
+  await asyncTest("Human stealth setup injects realistic browser navigator overrides", async () => {
+    const testBrowser = await chromium.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+    });
+    const testCtx = await testBrowser.newContext();
+    const testPage = await testCtx.newPage();
+
+    await human.setupHumanStealth(testPage);
+    await testPage.goto("data:text/html,<html><body><h1>Test Stealth</h1></body></html>");
+
+    const evalResult = await testPage.evaluate(() => {
+      return {
+        webdriver: navigator.webdriver,
+        hasChrome: typeof window.chrome === "object" && typeof window.chrome.runtime === "object",
+        languages: navigator.languages,
+        pluginsLength: navigator.plugins.length,
+        hardwareConcurrency: navigator.hardwareConcurrency
+      };
+    });
+
+    assert.ok(!evalResult.webdriver, "navigator.webdriver must be false or undefined");
+    assert.strictEqual(evalResult.hasChrome, true, "window.chrome.runtime must exist");
+    assert.ok(evalResult.languages.includes("en-KE"), "navigator.languages must include en-KE");
+    assert.ok(evalResult.pluginsLength > 0, "navigator.plugins must be populated");
+    assert.strictEqual(evalResult.hardwareConcurrency, 8, "hardwareConcurrency must be realistic (8)");
+
+    await testBrowser.close();
   });
 
   // ─────────────────────────────────────────────────────────────────────────

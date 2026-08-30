@@ -188,6 +188,46 @@ const FIELD_VALIDATORS = {
     if (!val || typeof val !== "string") return false;
     const str = val.trim();
     return str.length >= 3 && !isBoilerplateText(str) && !/^(dashboard|sign\s*out|logout|profile|menu|null|undefined)$/i.test(str);
+  },
+  phone: (val) => {
+    if (!val || (typeof val !== "string" && typeof val !== "number")) return false;
+    const str = String(val).replace(/[\s\-]/g, "");
+    return /^(?:\+?254|0)[17]\d{8}$/.test(str) && !isBoilerplateText(str);
+  },
+  email: (val) => {
+    if (!val || typeof val !== "string") return false;
+    const str = val.trim();
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str) && !isBoilerplateText(str);
+  },
+  county: (val) => {
+    if (!val || typeof val !== "string") return false;
+    const str = val.trim();
+    return str.length >= 3 && !isBoilerplateText(str) && !/^(select|choose|null|undefined)$/i.test(str);
+  },
+  subCounty: (val) => {
+    if (!val || typeof val !== "string") return false;
+    const str = val.trim();
+    return str.length >= 3 && !isBoilerplateText(str) && !/^(select|choose|null|undefined)$/i.test(str);
+  },
+  constituency: (val) => {
+    if (!val || typeof val !== "string") return false;
+    const str = val.trim();
+    return str.length >= 3 && !isBoilerplateText(str) && !/^(select|choose|null|undefined)$/i.test(str);
+  },
+  dob: (val) => {
+    if (!val || typeof val !== "string") return false;
+    const str = val.trim();
+    return /^[\d\/\-\.]{6,12}$/.test(str) && !isBoilerplateText(str);
+  },
+  gender: (val) => {
+    if (!val || typeof val !== "string") return false;
+    const str = val.trim();
+    return /^(male|female|m|f)$/i.test(str) && !isBoilerplateText(str);
+  },
+  registrationNumber: (val) => {
+    if (!val || typeof val !== "string") return false;
+    const str = val.trim();
+    return str.length >= 3 && !isBoilerplateText(str);
   }
 };
 
@@ -351,6 +391,13 @@ function resolveHefProfile(input = {}) {
     accountNumber = String(input.accountNumber).trim();
   }
 
+  const county = (input.county && FIELD_VALIDATORS.county(input.county)) ? input.county.trim() : null;
+  const subCounty = (input.subCounty && FIELD_VALIDATORS.subCounty(input.subCounty)) ? input.subCounty.trim() : null;
+  const constituency = (input.constituency && FIELD_VALIDATORS.constituency(input.constituency)) ? input.constituency.trim() : null;
+  const dob = (input.dob && FIELD_VALIDATORS.dob(input.dob)) ? input.dob.trim() : null;
+  const gender = (input.gender && FIELD_VALIDATORS.gender(input.gender)) ? input.gender.trim() : null;
+  const registrationNumber = (input.registrationNumber && FIELD_VALIDATORS.registrationNumber(input.registrationNumber)) ? input.registrationNumber.trim() : null;
+
   // Band resolution: strictly extract from input without guessing random numbers
   let bandNum = null;
   if (input.band) {
@@ -445,7 +492,13 @@ function resolveHefProfile(input = {}) {
       currentSemester,
       academicYear,
       bankName,
-      accountNumber
+      accountNumber,
+      county,
+      subCounty,
+      constituency,
+      dob,
+      gender,
+      registrationNumber
     },
     funding: {
       band: bandNum,
