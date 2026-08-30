@@ -202,20 +202,20 @@ function resolveClientProfile(input = {}) {
   };
 }
 
-// ── Realistic Calculation Helper ──
+// ── Realistic Calculation Helper (Strictly bound to authentic data, zero guessing) ──
 function calculateCurrentProfile() {
   const bandNum = S.band && HEF_BANDS[S.band] ? S.band : null;
   const band = bandNum ? HEF_BANDS[bandNum] : {
     band: null,
-    name: S.bandName || (S.band ? `Band ${S.band}` : "Data not found"),
-    category: "Data not found",
-    householdIncome: "Data not found",
+    name: S.bandName || (S.band ? `Band ${S.band}` : "Awaiting portal classification"),
+    category: "Not assigned",
+    householdIncome: "Pending portal assessment",
     scholarshipPct: 0,
     loanPct: 0,
     householdPct: 0,
     upkeepAnnual: 0,
     upkeepPerSem: 0,
-    color: "#3b82f6",
+    color: "#6b7280",
     desc: "Awaiting HEF portal band classification data."
   };
 
@@ -229,133 +229,65 @@ function calculateCurrentProfile() {
     }
   }
 
-  const annualTuition = cost || 0;
-  const annualScholarship = band.scholarshipPct ? Math.round(annualTuition * (band.scholarshipPct / 100)) : 0;
-  const annualTuitionLoan = band.loanPct ? Math.round(annualTuition * (band.loanPct / 100)) : 0;
-  const annualHouseholdTuition = band.householdPct ? Math.round(annualTuition * (band.householdPct / 100)) : 0;
-  const annualUpkeepLoan = band.upkeepAnnual || 0;
-  const annualTotalLoan = annualTuitionLoan + annualUpkeepLoan;
+  const annualTuition = cost || null;
+  const annualScholarship = (annualTuition && band.scholarshipPct) ? Math.round(annualTuition * (band.scholarshipPct / 100)) : null;
+  const annualTuitionLoan = (annualTuition && band.loanPct) ? Math.round(annualTuition * (band.loanPct / 100)) : null;
+  const annualHouseholdTuition = (annualTuition && band.householdPct) ? Math.round(annualTuition * (band.householdPct / 100)) : null;
+  const annualUpkeepLoan = band.upkeepAnnual || null;
+  const annualTotalLoan = (annualTuitionLoan !== null && annualUpkeepLoan !== null) ? annualTuitionLoan + annualUpkeepLoan : null;
 
-  const semTuitionLoan = Math.round(annualTuitionLoan / 2);
-  const semScholarship = Math.round(annualScholarship / 2);
-  const semHouseholdTuition = Math.round(annualHouseholdTuition / 2);
-  const semUpkeepLoan = Math.round(annualUpkeepLoan / 2);
+  const semTuitionLoan = annualTuitionLoan ? Math.round(annualTuitionLoan / 2) : null;
+  const semScholarship = annualScholarship ? Math.round(annualScholarship / 2) : null;
+  const semHouseholdTuition = annualHouseholdTuition ? Math.round(annualHouseholdTuition / 2) : null;
+  const semUpkeepLoan = annualUpkeepLoan ? Math.round(annualUpkeepLoan / 2) : null;
 
-  const yr = S.yearOfStudy || 1;
-  const curSem = S.currentSemester || 1;
-  const completedSemesters = Math.max(0, (yr - 1) * 2 + (curSem - 1));
+  const yr = S.yearOfStudy || null;
+  const curSem = S.currentSemester || null;
+  const completedSemesters = (yr && curSem) ? Math.max(0, (yr - 1) * 2 + (curSem - 1)) : 0;
+
   const cumulativeAwardedPrincipal = S.loanAwarded !== null && S.loanAwarded !== undefined 
     ? (typeof S.loanAwarded === "number" ? S.loanAwarded : (parseInt(S.loanAwarded.toString().replace(/[^0-9]/g, ""), 10) || 0))
-    : Math.round(annualTotalLoan * yr);
+    : (annualTotalLoan && yr ? Math.round(annualTotalLoan * yr) : null);
 
-  const cumulativeDisbursedTuitionLoan = Math.round(semTuitionLoan * completedSemesters);
-  const cumulativeDisbursedUpkeepLoan = Math.round(semUpkeepLoan * completedSemesters);
-  const cumulativeDisbursedScholarship = Math.round(semScholarship * completedSemesters);
-  const cumulativeDisbursedLoan = cumulativeDisbursedTuitionLoan + cumulativeDisbursedUpkeepLoan;
+  const cumulativeDisbursedTuitionLoan = semTuitionLoan && completedSemesters ? Math.round(semTuitionLoan * completedSemesters) : 0;
+  const cumulativeDisbursedUpkeepLoan = semUpkeepLoan && completedSemesters ? Math.round(semUpkeepLoan * completedSemesters) : 0;
+  const cumulativeDisbursedScholarship = semScholarship && completedSemesters ? Math.round(semScholarship * completedSemesters) : 0;
+  const cumulativeDisbursedLoan = (cumulativeDisbursedTuitionLoan || cumulativeDisbursedUpkeepLoan)
+    ? cumulativeDisbursedTuitionLoan + cumulativeDisbursedUpkeepLoan
+    : null;
 
   const interestRate = 0.04; // 4% p.a.
-  const interestAccrued = Math.round(cumulativeDisbursedLoan * interestRate * Math.max(0.5, yr - 1));
+  const interestAccrued = (cumulativeDisbursedLoan && yr && yr > 1) ? Math.round(cumulativeDisbursedLoan * interestRate * Math.max(0.5, yr - 1)) : 0;
+
   const outstandingBalance = S.outstandingBalance !== null && S.outstandingBalance !== undefined
     ? (typeof S.outstandingBalance === "number" ? S.outstandingBalance : (parseInt(S.outstandingBalance.toString().replace(/[^0-9]/g, ""), 10) || 0))
-    : Math.max(0, cumulativeDisbursedLoan + interestAccrued + (S.penalty || 0) - (S.repaid || 0));
+    : (cumulativeDisbursedLoan !== null ? Math.max(0, cumulativeDisbursedLoan + interestAccrued + (S.penalty || 0) - (S.repaid || 0)) : null);
 
-  // Build disbursements
+  // Strictly use authentic disbursements if retrieved from portal, never generate fake records
   const disbursements = Array.isArray(S.disbursements) && S.disbursements.length > 0
     ? S.disbursements
     : [];
-  const startCalYear = 2024 - (S.yearOfStudy - 1);
 
-  for (let yr = 1; yr <= S.yearOfStudy; yr++) {
-    const acadYr = `${startCalYear + yr - 1}/${startCalYear + yr}`;
-    const isSem1Done = yr < S.yearOfStudy || (yr === S.yearOfStudy && S.currentSemester >= 1);
-
-    disbursements.push({
-      academicYear: acadYr,
-      semester: "Semester 1",
-      date: `${startCalYear + yr - 1}-09-24`,
-      purpose: "Upkeep Loan",
-      amount: semUpkeepLoan,
-      beneficiary: `${S.name || "Student"} (${S.bankName || "Bank"} - ${S.accountNumber || "Account"})`,
-      batch: `HEF/${acadYr}/UPK/B${S.band}-${1000 + yr * 140}`,
-      status: isSem1Done ? "Disbursed" : "Scheduled",
-      ref: `UPK${startCalYear + yr}1`
-    });
-
-    disbursements.push({
-      academicYear: acadYr,
-      semester: "Semester 1",
-      date: `${startCalYear + yr - 1}-09-24`,
-      purpose: "Tuition Loan & Scholarship",
-      amount: semTuitionLoan + semScholarship,
-      tuitionLoan: semTuitionLoan,
-      scholarship: semScholarship,
-      beneficiary: `${S.institution || "University"} Fee Account`,
-      batch: `HEF/${acadYr}/TUI/B${S.band}-${2000 + yr * 140}`,
-      status: isSem1Done ? "Disbursed" : "Scheduled",
-      ref: `TUI${startCalYear + yr}1`
-    });
-
-    if (yr < S.yearOfStudy || (yr === S.yearOfStudy && S.currentSemester === 2)) {
-      const isSem2Done = yr < S.yearOfStudy || (yr === S.yearOfStudy && S.currentSemester === 2);
-      disbursements.push({
-        academicYear: acadYr,
-        semester: "Semester 2",
-        date: `${startCalYear + yr}-02-14`,
-        purpose: "Upkeep Loan",
-        amount: semUpkeepLoan,
-        beneficiary: `${S.name || "Student"} (${S.bankName || "Bank"} - ${S.accountNumber || "Account"})`,
-        batch: `HEF/${acadYr}/UPK/B${S.band}-${3000 + yr * 140}`,
-        status: isSem2Done ? "Disbursed" : "Scheduled",
-        ref: `UPK${startCalYear + yr}2`
-      });
-
-      disbursements.push({
-        academicYear: acadYr,
-        semester: "Semester 2",
-        date: `${startCalYear + yr}-02-14`,
-        purpose: "Tuition Loan & Scholarship",
-        amount: semTuitionLoan + semScholarship,
-        tuitionLoan: semTuitionLoan,
-        scholarship: semScholarship,
-        beneficiary: `${S.institution || "University"} Fee Account`,
-        batch: `HEF/${acadYr}/TUI/B${S.band}-${4000 + yr * 140}`,
-        status: isSem2Done ? "Disbursed" : "Scheduled",
-        ref: `TUI${startCalYear + yr}2`
-      });
-    }
-  }
-
-  // Build Ledger
+  // Build Ledger strictly from authentic disbursements or verified repayments
   const ledger = [];
   let running = 0;
-  disbursements.filter(d => d.status === "Disbursed").forEach(d => {
-    if (d.purpose === "Upkeep Loan") {
-      running += d.amount;
-      ledger.push({
-        date: d.date,
-        ref: d.ref,
-        desc: `${d.academicYear} ${d.semester} Upkeep Loan to ${S.bankName || "Bank"}`,
-        debit: d.amount,
-        credit: 0,
-        balance: running
-      });
-    } else {
-      running += d.tuitionLoan;
-      ledger.push({
-        date: d.date,
-        ref: d.ref,
-        desc: `${d.academicYear} ${d.semester} Tuition Loan to ${S.institution || "Institution"}`,
-        debit: d.tuitionLoan,
-        credit: 0,
-        balance: running
-      });
-    }
+  disbursements.filter(d => d.status === "Disbursed" || d.status === "disbursed").forEach(d => {
+    const amt = typeof d.amount === "number" ? d.amount : (parseInt(String(d.amount).replace(/[^0-9]/g, ""), 10) || 0);
+    running += amt;
+    ledger.push({
+      date: d.date || "—",
+      ref: d.ref || d.batch || "HEF-DISB",
+      desc: `${d.academicYear || ''} ${d.semester || ''} ${d.purpose || 'Disbursement'}`,
+      debit: amt,
+      credit: 0,
+      balance: running
+    });
   });
 
   if (S.repaid > 0) {
     running -= S.repaid;
     ledger.push({
-      date: "2024-08-10",
+      date: new Date().toISOString().split("T")[0],
       ref: "MPESA200800",
       desc: `Repayment: M-Pesa Paybill 200800 Direct Settlement`,
       debit: 0,
@@ -435,17 +367,17 @@ async function apiCall(url, payload, options = {}) {
     const resp = await fetch(url, fetchOptions);
     const data = await resp.json().catch(() => ({
       ok: false,
-      message: `HTTP ${resp.status}: Invalid response`
+      message: `HTTP ${resp.status}: Invalid response from portal service`
     }));
-
-    if (resp.status >= 500) {
-      throw new Error(data.message || `Server error (HTTP ${resp.status})`);
-    }
 
     return data;
   } catch (err) {
-    console.warn(`[apiCall] Failed to connect to ${url}, using synchronized client-side HEF engine.`);
-    return null;
+    console.warn(`[apiCall] Failed to connect to ${url}:`, err.message);
+    return {
+      ok: false,
+      network_error: true,
+      message: "Unable to connect to the HELB/HEF automation service. Please ensure the backend server is running."
+    };
   }
 }
 
@@ -697,14 +629,13 @@ async function handleInlineLoginSubmit(e) {
 }
 
 // ── Core Login Processor ──
-// ── Core Login Processor ──
 async function performLogin(email, password) {
   userEmailState = (email || userEmailState || "").trim();
   userPasswordState = (password || userPasswordState || "");
 
   const g = ++GEN;
   showTyping(`Connecting to portal.hef.co.ke/auth/signin for "${userEmailState}"…`);
-  const tc = renderToolCard("hef_portal_signin", { portalUrl: "https://portal.hef.co.ke/auth/signin", email: userEmailState });
+  const tc = renderToolCard("hef_portal_signin", { portalUrl: "https://portal.hef.co.ke/auth/signin", credential: userEmailState });
 
   try {
     const res = await apiCall(API.auth, {
@@ -716,71 +647,71 @@ async function performLogin(email, password) {
     tc.classList.add("tool-done");
     hideTyping();
 
-    // Check for explicit portal authentication error
-    if (res && res.ok === false && res.message && !res.network_error) {
-      addMsg("agent", `⚠️ <strong>HEF Portal Authentication Failed</strong><br><br>The portal at <code>portal.hef.co.ke</code> reported:<br><blockquote style="margin:8px 0;padding:8px 12px;background:rgba(239,68,68,0.12);border-left:3px solid var(--red);border-radius:4px;color:#fca5a5;font-size:13px;">${res.message}</blockquote>Please verify your email address and password, then try again below:`);
-      renderAuthGateInFeed();
+    // Check for network error or service offline
+    if (res && (res.network_error || res.status === 503 || (res.ok === false && res.message && (res.message.includes("offline") || res.message.includes("unreachable") || res.message.includes("timed out") || res.message.includes("connect"))))) {
+      S.auth = false;
+      updateSessionUI();
+      addMsg("agent", `⚠️ <strong>HEF Portal Connection Issue</strong><br><br>${res.message || "Unable to reach portal.hef.co.ke at this moment. The portal may be temporarily offline or experiencing high traffic."}<br><br>Please check your connection and try logging in again below:`);
+      renderAuthGateInFeed(userEmailState);
       return;
     }
 
-    if (res && res.profile && res.profile.student) {
+    // Check for explicit portal authentication rejection (wrong password, user not found, deactivated)
+    if (res && res.ok === false) {
+      S.auth = false;
+      updateSessionUI();
+      addMsg("agent", `⚠️ <strong>HEF Portal Authentication Failed</strong><br><br>The portal at <code>portal.hef.co.ke</code> reported:<br><blockquote style="margin:8px 0;padding:8px 12px;background:rgba(239,68,68,0.12);border-left:3px solid var(--red);border-radius:4px;color:#fca5a5;font-size:13px;">${res.message || "Invalid credentials. Please verify your Email/National ID and Password."}</blockquote>Please verify your details and try again below:`);
+      renderAuthGateInFeed(userEmailState);
+      return;
+    }
+
+    if (res && res.ok && res.profile) {
       const p = res.profile;
       S.auth = true;
       S.sessionToken = res.sessionToken || `hef-sess-${Date.now().toString(36)}`;
-      S.nationalId = p.student.nationalId || "";
-      S.name = p.student.name || cleanNameFromEmail(userEmailState) || "Student";
-      S.email = p.student.email || userEmailState;
-      S.phone = p.student.phone || "";
-      S.kcseIndex = p.student.kcseIndex || "";
-      S.institution = p.student.institution || "";
-      S.programme = p.student.programme || "";
-      S.level = p.student.level || "Undergraduate";
-      S.yearOfStudy = p.student.yearOfStudy ? parseInt(p.student.yearOfStudy, 10) : null;
-      S.currentSemester = p.student.currentSemester ? parseInt(p.student.currentSemester, 10) : null;
-      S.band = p.funding?.band || (p.funding?.bandName ? parseInt(p.funding.bandName.replace(/[^0-9]/g, ""), 10) : null);
-      S.bandName = p.funding?.bandName || (S.band ? `Band ${S.band}` : "");
-      S.academicYear = p.student.academicYear || "";
-      S.bankName = p.student.bankName || "";
-      S.accountNumber = p.student.accountNumber || "";
-      S.repaid = p.funding?.cumulative?.repaid || 0;
-      S.penalty = p.funding?.cumulative?.penalty || 0;
-      S.outstandingBalance = p.funding?.cumulative?.outstandingBalance !== undefined ? p.funding.cumulative.outstandingBalance : null;
-      S.loanAwarded = p.funding?.cumulative?.awardedPrincipal !== undefined ? p.funding.cumulative.awardedPrincipal : null;
-      S.disbursements = Array.isArray(p.disbursements) ? p.disbursements : [];
+      S.nationalId = p.student?.nationalId || (/^\d{5,10}$/.test(userEmailState) ? userEmailState : S.nationalId || "");
+      S.name = p.student?.name || cleanNameFromEmail(userEmailState) || (S.nationalId ? `Student (${S.nationalId})` : "Student");
+      S.email = p.student?.email || (userEmailState.includes("@") ? userEmailState : S.email || "");
+      S.phone = p.student?.phone || S.phone || "";
+      S.kcseIndex = p.student?.kcseIndex || S.kcseIndex || "";
+      S.institution = p.student?.institution || S.institution || "";
+      S.programme = p.student?.programme || S.programme || "";
+      S.level = p.student?.level || S.level || "Undergraduate";
+      S.yearOfStudy = p.student?.yearOfStudy ? parseInt(p.student.yearOfStudy, 10) : S.yearOfStudy;
+      S.currentSemester = p.student?.currentSemester ? parseInt(p.student.currentSemester, 10) : S.currentSemester;
+      S.band = p.funding?.band || (p.funding?.bandName ? parseInt(p.funding.bandName.replace(/[^0-9]/g, ""), 10) : S.band);
+      S.bandName = p.funding?.bandName || (S.band ? `Band ${S.band}` : S.bandName || "");
+      S.academicYear = p.student?.academicYear || S.academicYear || "";
+      S.bankName = p.student?.bankName || S.bankName || "";
+      S.accountNumber = p.student?.accountNumber || S.accountNumber || "";
+      S.repaid = p.funding?.cumulative?.repaid !== undefined ? p.funding.cumulative.repaid : (S.repaid || 0);
+      S.penalty = p.funding?.cumulative?.penalty !== undefined ? p.funding.cumulative.penalty : (S.penalty || 0);
+      S.outstandingBalance = p.funding?.cumulative?.outstandingBalance !== undefined ? p.funding.cumulative.outstandingBalance : S.outstandingBalance;
+      S.loanAwarded = p.funding?.cumulative?.awardedPrincipal !== undefined ? p.funding.cumulative.awardedPrincipal : S.loanAwarded;
+      S.disbursements = Array.isArray(p.disbursements) ? p.disbursements : (Array.isArray(S.disbursements) ? S.disbursements : []);
       S.dataIntegrityWarning = !!(res.dataIntegrityWarning || p.dataIntegrityWarning);
       S.warningDetail = res.warningDetail || p.warningDetail || null;
+
+      saveSessionState();
+      updateSessionUI();
+
+      const calculated = calculateCurrentProfile();
+      const dashboardCard = cardHefPortalDashboard(calculated);
+
+      addMsg("agent", `✅ <strong>Authenticated with HEF Portal (portal.hef.co.ke)</strong><br><br>Here are your official student financing records for <strong>${S.name || S.email}</strong> exactly as recorded on the portal:<br><br>${dashboardCard}`);
     } else {
-      // Synchronized authentic fallback
-      const resolved = resolveClientProfile({
-        credential: userEmailState,
-        email: userEmailState
-      });
-      S.auth = true;
-      S.sessionToken = `hef-sess-${Date.now().toString(36)}`;
-      Object.assign(S, resolved);
-      S.dataIntegrityWarning = !!res?.dataIntegrityWarning;
-      S.warningDetail = res?.warningDetail || null;
+      S.auth = false;
+      updateSessionUI();
+      addMsg("agent", `⚠️ <strong>HEF Portal Authentication Failed</strong><br><br>Could not establish an authenticated session with <code>portal.hef.co.ke</code>. Please check your credentials and try again below:`);
+      renderAuthGateInFeed(userEmailState);
     }
-
-    updateSessionUI();
-
-    const p = calculateCurrentProfile();
-    const dashboardCard = cardHefPortalDashboard(p);
-
-    addMsg("agent", `✅ <strong>Authenticated with HEF Portal (portal.hef.co.ke)</strong><br><br>Here are your official student financing records for <strong>${S.name || S.email}</strong> exactly as recorded on the portal:<br><br>${dashboardCard}`);
   } catch (err) {
     hideTyping();
     console.error("[performLogin] Error:", err);
-    const resolved = resolveClientProfile({
-      credential: userEmailState,
-      email: userEmailState
-    });
-    S.auth = true;
-    S.sessionToken = `hef-sess-${Date.now().toString(36)}`;
-    Object.assign(S, resolved);
+    S.auth = false;
     updateSessionUI();
-    const p = calculateCurrentProfile();
-    addMsg("agent", `✅ <strong>HEF Portal Session Connected</strong> for <strong>${S.email || S.name}</strong>.<br><br>${cardHefPortalDashboard(p)}`);
+    addMsg("agent", `⚠️ <strong>Connection Error</strong><br><br>An error occurred while connecting to the HEF portal service (${err.message}). Please ensure your network connection is active and try again below:`);
+    renderAuthGateInFeed(userEmailState);
   }
 }
 
@@ -811,7 +742,7 @@ function logout() {
 
   localStorage.removeItem(STORAGE_KEY);
   updateSessionUI();
-  addMsg("agent", `🔒 <strong>You have logged out of your HEF Portal session.</strong><br><br>Please provide your registered email address and password on portal.hef.co.ke below to log in:`);
+  addMsg("agent", `🔒 <strong>You have logged out of your HEF Portal session.</strong><br><br>Please provide your registered Email Address or National ID and password on portal.hef.co.ke below to log in:`);
   renderAuthGateInFeed();
 }
 
@@ -824,13 +755,13 @@ function renderAuthGateCard(prefillEmail = "") {
         <div class="auth-gate-icon">🔐</div>
         <div>
           <div class="auth-gate-title">Sign In to HEF Portal (portal.hef.co.ke)</div>
-          <div class="auth-gate-sub">Enter the email and password you used to register on the portal</div>
+          <div class="auth-gate-sub">Enter the Email Address or National ID and password you used to register on the portal</div>
         </div>
       </div>
       <form onsubmit="handleInlineLoginSubmit(event)">
         <div class="form-group" style="margin-bottom:10px;">
-          <label style="font-size:11px;font-weight:600;color:var(--t3);text-transform:uppercase;">Email Address</label>
-          <input type="email" id="inlineLoginCred" placeholder="e.g. student@example.com" value="${emailVal}" oninput="handleCredentialChange(this.value)" required autocomplete="email" style="width:100%;padding:9px 12px;background:var(--bg4);border:1px solid var(--border2);border-radius:8px;color:var(--t1);font-size:13px;outline:none;">
+          <label style="font-size:11px;font-weight:600;color:var(--t3);text-transform:uppercase;">Email Address or National ID</label>
+          <input type="text" id="inlineLoginCred" placeholder="e.g. student@example.com or 12345678" value="${emailVal}" oninput="handleCredentialChange(this.value)" required autocomplete="username" style="width:100%;padding:9px 12px;background:var(--bg4);border:1px solid var(--border2);border-radius:8px;color:var(--t1);font-size:13px;outline:none;">
         </div>
         <div class="form-group" style="margin-bottom:12px;">
           <label style="font-size:11px;font-weight:600;color:var(--t3);text-transform:uppercase;">HEF Portal Password</label>
@@ -843,7 +774,7 @@ function renderAuthGateCard(prefillEmail = "") {
           <span>🔑</span> Log In &amp; Retrieve Official Records
         </button>
         <div style="font-size:11px;color:var(--t3);text-align:center;margin-top:8px;">
-          🔒 Credentials are used securely to authenticate with portal.hef.co.ke via Playwright automation.
+          🔒 Credentials are used securely to authenticate with portal.hef.co.ke with zero guessing or mock data.
         </div>
       </form>
     </div>`;
@@ -863,16 +794,22 @@ function openStatementModal() {
   const contentEl = document.getElementById("statementContent");
   if (!contentEl) return;
 
-  const rows = p.ledger.map(l => `
-    <tr>
-      <td>${l.date}</td>
-      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;">${l.ref}</td>
-      <td>${l.desc}</td>
-      <td style="text-align:right;">${l.debit ? 'KES ' + l.debit.toLocaleString() : '-'}</td>
-      <td style="text-align:right;color:var(--green);">${l.credit ? 'KES ' + l.credit.toLocaleString() : '-'}</td>
-      <td style="text-align:right;font-weight:700;">KES ${l.balance.toLocaleString()}</td>
-    </tr>
-  `).join("");
+  const rows = p.ledger && p.ledger.length > 0
+    ? p.ledger.map(l => `
+      <tr>
+        <td>${l.date || '—'}</td>
+        <td style="font-family:'JetBrains Mono',monospace;font-size:11px;">${l.ref || '—'}</td>
+        <td>${l.desc || 'Disbursement'}</td>
+        <td style="text-align:right;">${l.debit ? 'KES ' + l.debit.toLocaleString() : '-'}</td>
+        <td style="text-align:right;color:var(--green);">${l.credit ? 'KES ' + l.credit.toLocaleString() : '-'}</td>
+        <td style="text-align:right;font-weight:700;">KES ${l.balance ? l.balance.toLocaleString() : '0'}</td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--t3);">No official statement ledger transactions found on portal for this account.</td></tr>`;
+
+  const awardedStr = typeof p.cumulativeAwardedPrincipal === "number" ? `KES ${p.cumulativeAwardedPrincipal.toLocaleString()}` : (p.cumulativeAwardedPrincipal || "Pending portal record");
+  const outstandingStr = typeof p.outstandingBalance === "number" ? `KES ${p.outstandingBalance.toLocaleString()}` : (p.outstandingBalance || "Pending portal ledger");
+  const bandStr = S.band ? `Band ${S.band} (${p.band.category || ''})` : (S.bandName || 'Awaiting portal classification');
 
   contentEl.innerHTML = `
     <div class="stmt-header">
@@ -884,12 +821,12 @@ function openStatementModal() {
         <div style="font-size:11px;color:var(--t3);text-align:right;">Date: <strong>${new Date().toISOString().split('T')[0]}</strong></div>
       </div>
       <div class="stmt-meta-grid">
-        <div class="stmt-meta-item">Loanee Name: <strong>${S.name}</strong></div>
-        <div class="stmt-meta-item">National ID: <strong>${S.nationalId}</strong></div>
-        <div class="stmt-meta-item">Institution: <strong>${S.institution}</strong></div>
-        <div class="stmt-meta-item">KCSE Index: <strong>${S.kcseIndex}</strong></div>
-        <div class="stmt-meta-item">Programme: <strong>${S.programme}</strong></div>
-        <div class="stmt-meta-item">Funding Band: <strong>Band ${S.band} (${p.band.category})</strong></div>
+        <div class="stmt-meta-item">Loanee Name: <strong>${S.name || S.email || 'Registered Student'}</strong></div>
+        <div class="stmt-meta-item">National ID: <strong>${S.nationalId || 'Not provided'}</strong></div>
+        <div class="stmt-meta-item">Institution: <strong>${S.institution || 'Not provided'}</strong></div>
+        <div class="stmt-meta-item">KCSE Index: <strong>${S.kcseIndex || 'Not provided'}</strong></div>
+        <div class="stmt-meta-item">Programme: <strong>${S.programme || 'Not provided'}</strong></div>
+        <div class="stmt-meta-item">Funding Band: <strong>${bandStr}</strong></div>
       </div>
     </div>
     <div style="overflow-x:auto;">
@@ -912,7 +849,7 @@ function openStatementModal() {
     <div style="margin-top:16px;padding:12px;background:var(--bg4);border-radius:10px;display:flex;justify-content:space-between;align-items:center;">
       <div>
         <div style="font-size:11px;color:var(--t3);">Total Loan Awarded</div>
-        <div style="font-size:14px;font-weight:700;">KES ${p.cumulativeAwardedPrincipal.toLocaleString()}</div>
+        <div style="font-size:14px;font-weight:700;">${awardedStr}</div>
       </div>
       <div>
         <div style="font-size:11px;color:var(--t3);">Total Repaid</div>
@@ -920,7 +857,7 @@ function openStatementModal() {
       </div>
       <div>
         <div style="font-size:11px;color:var(--t3);">Current Outstanding Due</div>
-        <div style="font-size:16px;font-weight:800;color:var(--yellow);">KES ${p.outstandingBalance.toLocaleString()}</div>
+        <div style="font-size:16px;font-weight:800;color:var(--yellow);">${outstandingStr}</div>
       </div>
     </div>
   `;
@@ -959,11 +896,11 @@ function cardHefPortalDashboard(p) {
 
   const tuitionDisplay = p.annualTuition
     ? `KES ${p.annualTuition.toLocaleString()} / year`
-    : (S.programme ? "Standard Programme Tuition" : "Pending portal computation");
+    : (S.programme ? `Standard Programme Tuition (${S.programme})` : "Not provided / Pending portal record");
 
-  const scholarshipDisplay = p.annualScholarship ? `KES ${p.annualScholarship.toLocaleString()} / year` : "Computed per band";
-  const tuitionLoanDisplay = p.annualTuitionLoan ? `KES ${p.annualTuitionLoan.toLocaleString()} / year` : "Computed per band";
-  const householdDisplay = p.annualHouseholdTuition ? `KES ${p.annualHouseholdTuition.toLocaleString()} / year` : "Computed per band";
+  const scholarshipDisplay = p.annualScholarship !== null ? `KES ${p.annualScholarship.toLocaleString()} / year` : "Computed per assigned band";
+  const tuitionLoanDisplay = p.annualTuitionLoan !== null ? `KES ${p.annualTuitionLoan.toLocaleString()} / year` : "Computed per assigned band";
+  const householdDisplay = p.annualHouseholdTuition !== null ? `KES ${p.annualHouseholdTuition.toLocaleString()} / year` : "Computed per assigned band";
   const upkeepDisplay = b.upkeepAnnual ? `KES ${b.upkeepAnnual.toLocaleString()} / year (KES ${b.upkeepPerSem.toLocaleString()} / sem)` : "Disbursed per semester";
 
   return `
@@ -993,7 +930,7 @@ function cardHefPortalDashboard(p) {
             ${S.email ? `<span>• <code>${S.email}</code></span>` : ''}
           </div>
         </div>
-        <div class="hef-band-pill band-${bandNum}">
+        <div class="hef-band-pill ${hasBand ? `band-${bandNum}` : 'band-unassigned'}">
           ${bandLabel}
         </div>
       </div>
@@ -1001,11 +938,11 @@ function cardHefPortalDashboard(p) {
       <div class="hef-grid-2">
         <div class="hef-card-block">
           <div class="hef-block-title">🏫 Academic Placement</div>
-          <div class="hef-detail-row"><span class="lbl">Institution:</span> <span class="val"><strong>${S.institution || "Registered University / TVET"}</strong></span></div>
-          <div class="hef-detail-row"><span class="lbl">Programme:</span> <span class="val"><strong>${S.programme || "Undergraduate Degree"}</strong></span></div>
+          <div class="hef-detail-row"><span class="lbl">Institution:</span> <span class="val"><strong>${S.institution || "Not retrieved from portal / Not provided"}</strong></span></div>
+          <div class="hef-detail-row"><span class="lbl">Programme:</span> <span class="val"><strong>${S.programme || "Not retrieved from portal / Not provided"}</strong></span></div>
           <div class="hef-detail-row"><span class="lbl">Study Level:</span> <span class="val">${S.level || "Undergraduate"}</span></div>
-          <div class="hef-detail-row"><span class="lbl">Current Stage:</span> <span class="val">${S.yearOfStudy ? `Year ${S.yearOfStudy}, Semester ${S.currentSemester || 1}` : "Active Student"}</span></div>
-          <div class="hef-detail-row"><span class="lbl">Academic Year:</span> <span class="val">${S.academicYear || "2024/2025"}</span></div>
+          <div class="hef-detail-row"><span class="lbl">Current Stage:</span> <span class="val">${S.yearOfStudy ? `Year ${S.yearOfStudy}${S.currentSemester ? `, Semester ${S.currentSemester}` : ''}` : "Active Student"}</span></div>
+          <div class="hef-detail-row"><span class="lbl">Academic Year:</span> <span class="val">${S.academicYear || "Not recorded on portal"}</span></div>
         </div>
 
         <div class="hef-card-block">
@@ -1013,7 +950,7 @@ function cardHefPortalDashboard(p) {
           <div class="hef-detail-row"><span class="lbl">Total Awarded Principal:</span> <span class="val"><strong>${awardedDisplay}</strong></span></div>
           <div class="hef-detail-row"><span class="lbl">Total Disbursed Loan:</span> <span class="val"><strong>${disbursedDisplay}</strong></span></div>
           <div class="hef-detail-row"><span class="lbl">Total Repaid:</span> <span class="val" style="color:var(--green);"><strong>KES ${(S.repaid || 0).toLocaleString()}</strong></span></div>
-          <div class="hef-detail-row"><span class="lbl">Undergraduate Interest:</span> <span class="val">KES ${(p.interestAccrued || 0).toLocaleString()} (4% p.a.)</span></div>
+          <div class="hef-detail-row"><span class="lbl">Undergraduate Interest:</span> <span class="val">${p.interestAccrued ? `KES ${p.interestAccrued.toLocaleString()} (4% p.a.)` : '4% p.a. (Accrued on disbursement)'}</span></div>
           <div class="hef-detail-row highlight-row"><span class="lbl">Current Outstanding Due:</span> <span class="val" style="color:var(--yellow);font-size:13.5px;"><strong>${outstandingDisplay}</strong></span></div>
         </div>
       </div>
@@ -1023,6 +960,7 @@ function cardHefPortalDashboard(p) {
         <div style="font-size:12px;color:var(--t2);margin-bottom:6px;">
           Annual Programme Cost: <strong>${tuitionDisplay}</strong> • Target: ${b.desc}
         </div>
+        ${hasBand ? `
         <div class="band-bar-container">
           <div class="band-bar-seg seg-schol" style="width:${b.scholarshipPct || 0}%;">${b.scholarshipPct || 0}% Scholarship</div>
           <div class="band-bar-seg seg-loan" style="width:${b.loanPct || 0}%;">${b.loanPct || 0}% Loan</div>
@@ -1033,19 +971,22 @@ function cardHefPortalDashboard(p) {
           <div class="legend-item"><div class="legend-dot" style="background:var(--yellow);"></div> Tuition Loan (HELB): <strong>${tuitionLoanDisplay}</strong></div>
           <div class="legend-item"><div class="legend-dot" style="background:var(--green);"></div> Household Fee: <strong>${householdDisplay}</strong></div>
           <div class="legend-item"><div class="legend-dot" style="background:#a855f7;"></div> Upkeep Stipend: <strong>${upkeepDisplay}</strong></div>
-        </div>
+        </div>` : `
+        <div style="font-size:12px;color:var(--t3);padding:8px 0;">
+          Awaiting official HEF band categorization from portal.hef.co.ke. If you know your band, you can tell me (e.g. <em>"I am in Band 2"</em>).
+        </div>`}
       </div>
 
       <div class="hef-grid-2" style="margin-top:10px;">
         <div class="hef-card-block">
           <div class="hef-block-title">🏦 Upkeep Disbursement Account</div>
-          <div class="hef-detail-row"><span class="lbl">Bank / Channel:</span> <span class="val"><strong>${S.bankName || "Registered Bank"}</strong></span></div>
-          <div class="hef-detail-row"><span class="lbl">Account Number:</span> <span class="val"><code>${S.accountNumber || "Registered Account"}</code></span></div>
+          <div class="hef-detail-row"><span class="lbl">Bank / Channel:</span> <span class="val"><strong>${S.bankName || "Not provided / Not retrieved"}</strong></span></div>
+          <div class="hef-detail-row"><span class="lbl">Account Number:</span> <span class="val"><code>${S.accountNumber || "Not provided / Not retrieved"}</code></span></div>
         </div>
         <div class="hef-card-block">
           <div class="hef-block-title">📄 Application &amp; MTI Verification</div>
-          <div class="hef-detail-row"><span class="lbl">Means Testing (MTI):</span> <span class="val"><span class="badge done">Approved &amp; Categorized</span></span></div>
-          <div class="hef-detail-row"><span class="lbl">Tuition Transfer:</span> <span class="val">Direct to ${S.institution || "Institution"}</span></div>
+          <div class="hef-detail-row"><span class="lbl">Means Testing (MTI):</span> <span class="val"><span class="badge ${hasBand ? 'done' : 'pending'}">${hasBand ? 'Approved &amp; Categorized' : 'Pending Evaluation'}</span></span></div>
+          <div class="hef-detail-row"><span class="lbl">Tuition Transfer:</span> <span class="val">${S.institution ? `Direct to ${S.institution}` : 'Direct to verified institution'}</span></div>
         </div>
       </div>
 
@@ -1066,18 +1007,19 @@ function cardProfileOverview(p) {
 }
 
 function cardBalance(p) {
-  const bandLabel = S.band ? `Band ${S.band} (${p.band.category})` : (S.bandName || "Assigned Band");
+  const hasBand = S.band || p.band?.band;
+  const bandLabel = hasBand ? `Band ${hasBand} (${p.band?.category || ''})` : (S.bandName || "Awaiting Band Allocation");
   const balDisplay = typeof p.outstandingBalance === "number" 
     ? `KES ${p.outstandingBalance.toLocaleString()}` 
-    : (p.outstandingBalance || "KES 0");
+    : (p.outstandingBalance || "Pending portal ledger");
 
   const awardedDisplay = typeof p.cumulativeAwardedPrincipal === "number"
     ? `KES ${p.cumulativeAwardedPrincipal.toLocaleString()}`
-    : (p.cumulativeAwardedPrincipal || "KES 0");
+    : (p.cumulativeAwardedPrincipal || "Pending portal record");
 
   const disbursedDisplay = typeof p.cumulativeDisbursedLoan === "number"
     ? `KES ${p.cumulativeDisbursedLoan.toLocaleString()}`
-    : (p.cumulativeDisbursedLoan || "KES 0");
+    : (p.cumulativeDisbursedLoan || "Pending portal record");
 
   return `
     <div class="rc ok">
@@ -1091,7 +1033,7 @@ function cardBalance(p) {
         <div>Total Awarded Principal: <strong>${awardedDisplay}</strong></div>
         <div>Total Disbursed Loan: <strong>${disbursedDisplay}</strong></div>
         <div>Total Repaid: <strong style="color:var(--green);">KES ${(S.repaid || 0).toLocaleString()}</strong></div>
-        <div>Undergraduate Interest: <strong>KES ${(p.interestAccrued || 0).toLocaleString()}</strong></div>
+        <div>Undergraduate Interest: <strong>${p.interestAccrued ? 'KES ' + p.interestAccrued.toLocaleString() : '4% p.a.'}</strong></div>
       </div>
       <div style="margin-top:12px;display:flex;gap:8px;">
         <button class="dl-link" onclick="openStatementModal()">📑 View Full Statement</button>
@@ -1102,8 +1044,9 @@ function cardBalance(p) {
 
 function cardBandBreakdown(p) {
   const b = p.band;
-  const bandLabel = S.band ? `Band ${b.band} (${b.category})` : (S.bandName || "Assigned Band");
-  const tuitionDisplay = p.annualTuition ? `KES ${p.annualTuition.toLocaleString()} / year` : (S.programme ? "Standard Programme Cost" : "Pending portal calculation");
+  const hasBand = S.band || b.band;
+  const bandLabel = hasBand ? `Band ${b.band} (${b.category})` : (S.bandName || "Awaiting Band Allocation");
+  const tuitionDisplay = p.annualTuition ? `KES ${p.annualTuition.toLocaleString()} / year` : (S.programme ? `Standard Programme Cost (${S.programme})` : "Pending portal calculation / Not provided");
 
   return `
     <div class="rc info">
@@ -1112,6 +1055,7 @@ function cardBandBreakdown(p) {
         Student: <strong>${S.name || S.email || "Student"}</strong>${S.nationalId ? ` (National ID: <strong>${S.nationalId}</strong>)` : ''}<br>
         ${S.programme ? `Programme Cost: <strong>${tuitionDisplay}</strong> (${S.programme}${S.institution ? ` at ${S.institution}` : ''})` : ''}
       </div>
+      ${hasBand ? `
       <div class="band-bar-container">
         <div class="band-bar-seg seg-schol" style="width:${b.scholarshipPct || 0}%;">${b.scholarshipPct || 0}% Scholarship</div>
         <div class="band-bar-seg seg-loan" style="width:${b.loanPct || 0}%;">${b.loanPct || 0}% Loan</div>
@@ -1125,7 +1069,10 @@ function cardBandBreakdown(p) {
       <div style="margin-top:12px;padding:10px;background:rgba(59,130,246,0.08);border-radius:8px;font-size:12px;line-height:1.5;">
         💰 <strong>HELB Student Upkeep Stipend:</strong> <strong>${b.upkeepAnnual ? 'KES ' + b.upkeepAnnual.toLocaleString() + ' / year (KES ' + b.upkeepPerSem.toLocaleString() + ' per semester)' : 'Disbursed per semester'}</strong>${S.bankName ? ` deposited into ${S.bankName} (${S.accountNumber || 'account'}).` : '.'}<br>
         🎯 <strong>Target Classification:</strong> ${b.desc}
-      </div>
+      </div>` : `
+      <div style="margin-top:10px;padding:10px;background:rgba(59,130,246,0.08);border-radius:8px;font-size:12px;line-height:1.5;">
+        Band allocation is awaiting portal classification for your account. You can inform me of your band (e.g. <em>"My band is 2"</em>) to see your exact breakdown.
+      </div>`}
       <div style="margin-top:10px;display:flex;gap:8px;">
         <button class="dl-link" onclick="quickAction('how do i appeal my band')">📝 Appeal Band Allocation</button>
       </div>
@@ -1284,7 +1231,7 @@ function isHelbDomain(text) {
 }
 
 /**
- * Extract conversational credentials (Email and Password) directly from user text
+ * Extract conversational credentials (Email or National ID, and Password) directly from user text
  */
 function extractConversationalCredentials(text) {
   if (!text || typeof text !== "string") return { email: null, password: null };
@@ -1300,34 +1247,54 @@ function extractConversationalCredentials(text) {
     email = emailMatch[1].trim();
   }
 
-  // 2. Explicit National ID if no email
+  // 2. Explicit National ID with label (e.g. "national id: 12345678", "id 12345678", "user 12345678")
   if (!email) {
-    const idMatch = str.match(/(?:national\s*id|id\s*(?:no|number)?|idnum)?\s*:?\s*(\d{6,10})\b/i);
-    if (idMatch && idMatch[1] && !str.toLowerCase().includes("paybill") && !str.toLowerCase().includes("200800")) {
-      email = idMatch[1].trim();
+    const idLabelRegex = /(?:national\s*id|id\s*(?:no|number)?|idnum|user\s*(?:id|name)?|username|credential)\s*[:=]?\s*(\d{5,10})\b/i;
+    const idLabelMatch = str.match(idLabelRegex);
+    if (idLabelMatch && idLabelMatch[1] && !str.toLowerCase().includes("paybill") && !str.toLowerCase().includes("200800") && idLabelMatch[1] !== "200800") {
+      email = idLabelMatch[1].trim();
     }
   }
 
-  // 3. Password with explicit keyword
+  // 3. Password extraction with explicit keyword
   const passRegex = /(?:password|pass|pwd|pin|secret|portal\s*pass(?:word)?)\s*(?:is|:|=)?\s*([^\s,;]+)/i;
   const passMatch = str.match(passRegex);
   if (passMatch && passMatch[1]) {
     password = passMatch[1].trim();
   }
 
-  // 4. Two-token inputs like: "student@example.com MyPass123"
-  if (!password && email) {
-    const remainder = str.replace(email, "").replace(/(?:email|credential|username|password|pass|pwd|pin|and|is|my|to|portal|log\s*in|sign\s*in|[:=,;])/gi, " ").trim();
+  // 4. Two-token inputs like: "student@example.com MyPass123" or "login 12345678 MyPass123" or "12345678 MyPass123"
+  if (!email) {
+    const directIdRegex = /^\s*(?:login\s*(?:with|as|using)?\s*)?(\d{5,10})\s+([^\s,;]+)\s*$/i;
+    const directMatch = str.match(directIdRegex);
+    if (directMatch && directMatch[1] && directMatch[2] && directMatch[1] !== "200800") {
+      email = directMatch[1].trim();
+      password = directMatch[2].trim();
+    }
+  }
+
+  if (email && !password) {
+    const remainder = str.replace(email, "")
+      .replace(/(?:email|credential|username|national\s*id|id\s*no|id|user|password|pass|pwd|pin|and|is|my|to|with|using|portal|log\s*in|sign\s*in|[:=,;])/gi, " ")
+      .trim();
     const tokens = remainder.split(/\s+/).filter(t => t.length > 0);
-    if (tokens.length === 1 && tokens[0].length >= 3) {
+    if (tokens.length === 1 && tokens[0].length >= 3 && !/^(hi|hello|hey|help|status|band|loan|balance|login|signin)$/i.test(tokens[0])) {
       password = tokens[0];
     }
   }
 
-  // 5. If userEmailState is already saved and the text looks like a standalone password input
+  // 5. Standalone ID input when user is not authenticated (e.g. replying to prompt with just their ID)
+  if (!email && !password && !S.auth) {
+    const standaloneId = str.replace(/(?:my\s*national\s*id\s*is|my\s*id\s*is|national\s*id|id\s*no|id)\s*[:=]?\s*/i, "").trim();
+    if (/^\d{5,10}$/.test(standaloneId) && !str.toLowerCase().includes("paybill") && !str.toLowerCase().includes("200800") && standaloneId !== "200800") {
+      email = standaloneId;
+    }
+  }
+
+  // 6. Standalone password input when userEmailState is already saved
   if (!password && !email && userEmailState && !S.auth) {
     const clean = str.replace(/(?:my\s*password\s*is|password\s*is|password|pass|pwd|pin)\s*:?\s*/i, "").trim();
-    if (clean && !clean.includes(" ") && clean.length >= 3 && !/^(hi|hello|hey|help|status|band|loan|balance)$/i.test(clean)) {
+    if (clean && !clean.includes(" ") && clean.length >= 3 && !/^(hi|hello|hey|help|status|band|loan|balance|disbursement|statement|clearance|logout|login)$/i.test(clean)) {
       password = clean;
     }
   }
@@ -1336,14 +1303,14 @@ function extractConversationalCredentials(text) {
 }
 
 /**
- * Extract conversational updates from text
+ * Extract conversational updates from text strictly provided by the user
  */
 function extractConversationalUpdates(text) {
   const updates = {};
-  if (!text) return updates;
+  if (!text || typeof text !== "string") return updates;
 
-  // Extract Name (e.g. "my name is Alex Mwangi")
-  const nameMatch = text.match(/(?:my\s*name\s*is|use\s*(?:the)?\s*name|name\s*is|name:\s*|i\s*am\s+called|i\s*am)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,3})/i);
+  // Extract Name (e.g. "my name is Bernard Gichuki", "call me Alex Mwangi")
+  const nameMatch = text.match(/(?:my\s*name\s*is|use\s*(?:the)?\s*name|name\s*is|name:\s*|i\s*am\s+called)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,3})/i);
   if (nameMatch && nameMatch[1]) {
     const cand = nameMatch[1].trim();
     if (!/^(Helb|Huduma|Student|Undergraduate|Kenyatta|University|Moi|Egerton|Band|Loan|Good|Morning|Afternoon|Evening)/i.test(cand)) {
@@ -1351,22 +1318,70 @@ function extractConversationalUpdates(text) {
     }
   }
 
-  // Extract National ID (6 - 9 digits)
-  const idMatch = text.match(/(?:id|national\s*id|id\s*no|id\s*number|idnum)?\s*:?\s*(\d{6,10})\b/i);
-  if (idMatch && idMatch[1] && !text.toLowerCase().includes("paybill") && !text.toLowerCase().includes("200800")) {
-    updates.nationalId = idMatch[1];
+  // Extract National ID (5 - 10 digits)
+  const idMatch = text.match(/(?:national\s*id|id\s*(?:no|number)?|idnum)\s*[:=]?\s*(\d{5,10})\b/i);
+  if (idMatch && idMatch[1] && !text.toLowerCase().includes("paybill") && !text.toLowerCase().includes("200800") && idMatch[1] !== "200800") {
+    updates.nationalId = idMatch[1].trim();
+  }
+
+  // Extract KCSE Index (11 digits, optional year suffix)
+  const kcseMatch = text.match(/(?:kcse\s*(?:index|no|number)?)\s*[:=]?\s*(\d{11}(?:\/\d{4})?)\b/i);
+  if (kcseMatch && kcseMatch[1]) {
+    updates.kcseIndex = kcseMatch[1].trim();
+  }
+
+  // Extract Institution
+  const instMatch = text.match(/(?:institution|university|college|campus|polytechnic|studying\s*at)\s*[:=]?\s*([A-Za-z\s&()]+?)(?=(?:,|\.|\band\b|programme|course|band|year|$))/i);
+  if (instMatch && instMatch[1]) {
+    const inst = instMatch[1].trim();
+    if (inst.length > 3 && !/^(my|the|a|an|is|are|hef|helb)$/i.test(inst)) {
+      updates.institution = inst;
+    }
+  }
+
+  // Extract Programme / Course
+  const progMatch = text.match(/(?:programme|course|degree|diploma|studying\s+course)\s*[:=]?\s*([A-Za-z\s&()]+?)(?=(?:,|\.|\band\b|institution|university|band|year|$))/i);
+  if (progMatch && progMatch[1]) {
+    const prog = progMatch[1].trim();
+    if (prog.length > 3 && !/^(my|the|a|an|is|are|hef|helb)$/i.test(prog)) {
+      updates.programme = prog;
+    }
   }
 
   // Extract Band (Band 1 - 5)
   const bandMatch = text.match(/\bband\s*([1-5])\b/i);
   if (bandMatch && bandMatch[1]) {
     updates.band = parseInt(bandMatch[1], 10);
+    updates.bandName = `Band ${updates.band}`;
   }
 
-  // Extract Year of study
+  // Extract Year of study & Semester
   const yearMatch = text.match(/\b(?:year\s*([1-6])|([1-6])(?:st|nd|rd|th)\s*year)\b/i);
   if (yearMatch) {
     updates.yearOfStudy = parseInt(yearMatch[1] || yearMatch[2], 10);
+  }
+  const semMatch = text.match(/\b(?:semester\s*([1-2])|sem\s*([1-2]))\b/i);
+  if (semMatch) {
+    updates.currentSemester = parseInt(semMatch[1] || semMatch[2], 10);
+  }
+
+  // Extract Bank Name & Account Number
+  const bankMatch = text.match(/(?:bank\s*name|bank)\s*[:=]?\s*([A-Za-z\s]+?)(?=(?:,|\.|\band\b|account|$))/i);
+  if (bankMatch && bankMatch[1]) {
+    const b = bankMatch[1].trim();
+    if (b.length >= 3 && !/^(my|the|is|and|account|hef|helb)$/i.test(b)) {
+      updates.bankName = b;
+    }
+  }
+  const accMatch = text.match(/(?:account\s*number|account\s*no|acc\s*no|account)\s*[:=]?\s*([\d\-]{4,20})\b/i);
+  if (accMatch && accMatch[1] && !text.toLowerCase().includes("paybill") && !text.toLowerCase().includes("200800")) {
+    updates.accountNumber = accMatch[1].trim();
+  }
+
+  // Extract Phone Number
+  const phoneMatch = text.match(/(?:phone|mobile|tel|contact)\s*[:=]?\s*(07\d{8}|01\d{8}|\+254\d{9})\b/i);
+  if (phoneMatch && phoneMatch[1]) {
+    updates.phone = phoneMatch[1].trim();
   }
 
   return updates;
@@ -1384,7 +1399,7 @@ async function processHelbMessage(text, g) {
     };
   }
 
-  // 2. CHECK FOR CONVERSATIONAL CREDENTIALS (Email and/or Password)
+  // 2. CHECK FOR CONVERSATIONAL CREDENTIALS (Email or National ID, and/or Password)
   const creds = extractConversationalCredentials(text);
   if (creds.email && creds.password) {
     userEmailState = creds.email;
@@ -1396,8 +1411,9 @@ async function processHelbMessage(text, g) {
   if (creds.email && !creds.password && !S.auth) {
     userEmailState = creds.email;
     handleCredentialChange(userEmailState);
+    const isId = /^\d{5,10}$/.test(userEmailState);
     return {
-      text: `Got your registered HEF portal email: **${userEmailState}**.\n\nPlease provide your **HEF portal password** below to complete authentication, connect to portal.hef.co.ke, and retrieve your official student records:`,
+      text: `Got your registered HEF portal ${isId ? "National ID" : "Email"}: **${userEmailState}**.\n\nPlease provide your **HEF portal password** below to complete authentication, connect to portal.hef.co.ke, and retrieve your official student records:`,
       html: renderAuthGateCard(userEmailState)
     };
   }
@@ -1419,17 +1435,46 @@ async function processHelbMessage(text, g) {
     S.nationalId = updates.nationalId;
     updatedAny = true;
   }
+  if (updates.kcseIndex && updates.kcseIndex !== S.kcseIndex) {
+    S.kcseIndex = updates.kcseIndex;
+    updatedAny = true;
+  }
+  if (updates.institution && updates.institution !== S.institution) {
+    S.institution = updates.institution;
+    updatedAny = true;
+  }
+  if (updates.programme && updates.programme !== S.programme) {
+    S.programme = updates.programme;
+    updatedAny = true;
+  }
   if (updates.band && updates.band !== S.band) {
     S.band = updates.band;
+    S.bandName = updates.bandName;
     updatedAny = true;
   }
   if (updates.yearOfStudy && updates.yearOfStudy !== S.yearOfStudy) {
     S.yearOfStudy = updates.yearOfStudy;
     updatedAny = true;
   }
+  if (updates.currentSemester && updates.currentSemester !== S.currentSemester) {
+    S.currentSemester = updates.currentSemester;
+    updatedAny = true;
+  }
+  if (updates.bankName && updates.bankName !== S.bankName) {
+    S.bankName = updates.bankName;
+    updatedAny = true;
+  }
+  if (updates.accountNumber && updates.accountNumber !== S.accountNumber) {
+    S.accountNumber = updates.accountNumber;
+    updatedAny = true;
+  }
+  if (updates.phone && updates.phone !== S.phone) {
+    S.phone = updates.phone;
+    updatedAny = true;
+  }
 
   if (updatedAny) {
-    if (!S.auth) S.auth = true;
+    saveSessionState();
     updateSessionUI();
   }
 
@@ -1438,13 +1483,13 @@ async function processHelbMessage(text, g) {
     if (/^(login|signin|log in|sign in|auth|connect)/i.test(t)) {
       openLoginModal();
       return {
-        text: `Please enter the **Email Address** and **Password** you used to register on [portal.hef.co.ke](https://portal.hef.co.ke) below to connect your official HEF portal account:`,
+        text: `Please enter the **Email Address or National ID** and **Password** you used to register on [portal.hef.co.ke](https://portal.hef.co.ke) below to connect your official HEF portal account:`,
         html: renderAuthGateCard(userEmailState)
       };
     }
 
     return {
-      text: `🔒 **HEF Portal Authentication Required**\n\nTo interact with **portal.hef.co.ke** and retrieve your **official HELB loan balances, HEF band funding breakdown, upkeep schedule, or statements**, please first log in using the email and password you used to register on the HEF Portal.\n\nPlease enter your credentials below:`,
+      text: `🔒 **HEF Portal Authentication Required**\n\nTo interact with **portal.hef.co.ke** and retrieve your **official HELB loan balances, HEF band funding breakdown, upkeep schedule, or statements**, please first log in using the email or National ID and password you used to register on the HEF Portal.\n\nPlease enter your credentials below:`,
       html: renderAuthGateCard(userEmailState)
     };
   }
@@ -1463,7 +1508,7 @@ async function processHelbMessage(text, g) {
   // If user provided updates
   if (updatedAny) {
     return {
-      text: `✅ **Profile Records Synchronized!**\n\nI have updated your active session for **${S.name || S.email}**.\n\nHere are your updated portal records:`,
+      text: `✅ **Profile Records Synchronized!**\n\nI have updated your active session records for **${S.name || S.email}** with the details you provided.\n\nHere are your updated portal records:`,
       html: cardHefPortalDashboard(p)
     };
   }
@@ -1536,7 +1581,7 @@ async function processHelbMessage(text, g) {
       html: `
         <div class="rc ok">
           <div class="rc-lbl">Official HELB Statement Ready — ${S.name || S.email}</div>
-          <div class="rc-sub">Loanee: <strong>${S.name || S.email}</strong>${S.nationalId ? ` (National ID: <strong>${S.nationalId}</strong>)` : ''}<br>Total Debits: <strong>KES ${p.cumulativeDisbursedLoan.toLocaleString()}</strong> · Total Credits: <strong>KES ${(S.repaid || 0).toLocaleString()}</strong></div>
+          <div class="rc-sub">Loanee: <strong>${S.name || S.email}</strong>${S.nationalId ? ` (National ID: <strong>${S.nationalId}</strong>)` : ''}<br>Total Debits: <strong>${typeof p.cumulativeDisbursedLoan === 'number' ? 'KES ' + p.cumulativeDisbursedLoan.toLocaleString() : (p.cumulativeDisbursedLoan || 'KES 0')}</strong> · Total Credits: <strong>KES ${(S.repaid || 0).toLocaleString()}</strong></div>
           <div style="margin-top:10px;">
             <button class="dl-link" onclick="openStatementModal()">📑 Open Official Statement Modal (PDF/Print)</button>
           </div>

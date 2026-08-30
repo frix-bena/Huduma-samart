@@ -545,10 +545,16 @@ function extractUserDetailsFromText(text = "") {
   const extracted = {};
   if (!text) return extracted;
 
-  // Extract National ID (6 - 9 digits)
-  const idMatch = text.match(/\b(?:id|national\s*id|id\s*no|id\s*number|idnum)?\s*:?\s*(\d{6,10})\b/i);
-  if (idMatch && idMatch[1] && !text.toLowerCase().includes("paybill")) {
-    extracted.nationalId = idMatch[1];
+  // Extract National ID (5 - 10 digits with label)
+  const idMatch = text.match(/\b(?:national\s*id|id\s*(?:no|number)?|idnum)\s*[:=]?\s*(\d{5,10})\b/i);
+  if (idMatch && idMatch[1] && !text.toLowerCase().includes("paybill") && !text.toLowerCase().includes("200800") && idMatch[1] !== "200800") {
+    extracted.nationalId = idMatch[1].trim();
+  }
+
+  // Extract KCSE Index
+  const kcseMatch = text.match(/(?:kcse\s*(?:index|no|number)?)\s*[:=]?\s*(\d{11}(?:\/\d{4})?)\b/i);
+  if (kcseMatch && kcseMatch[1]) {
+    extracted.kcseIndex = kcseMatch[1].trim();
   }
 
   // Extract Band (Band 1, Band 2, Band 3, Band 4, Band 5)
@@ -562,18 +568,28 @@ function extractUserDetailsFromText(text = "") {
   if (yearMatch) {
     extracted.yearOfStudy = parseInt(yearMatch[1] || yearMatch[2], 10);
   }
+  const semMatch = text.match(/\b(?:semester\s*([1-2])|sem\s*([1-2]))\b/i);
+  if (semMatch) {
+    extracted.currentSemester = parseInt(semMatch[1] || semMatch[2], 10);
+  }
 
   // Extract Name
-  const nameMatch = text.match(/\b(?:my\s*name\s*is|i\s*am|name\s*is|called)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})/);
+  const nameMatch = text.match(/\b(?:my\s*name\s*is|use\s*(?:the)?\s*name|name\s*is|called)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})/);
   if (nameMatch && nameMatch[1]) {
     const candidate = nameMatch[1].trim();
-    if (!/^(Helb|Huduma|Student|Undergraduate|Kenyatta|University|Moi|Egerton)/i.test(candidate)) {
+    if (!/^(Helb|Huduma|Student|Undergraduate|Kenyatta|University|Moi|Egerton|Band|Loan|Good|Morning|Afternoon|Evening)/i.test(candidate)) {
       extracted.name = candidate;
     }
   }
 
   // Extract University / Institution
-  const instMatch = INSTITUTIONS.find(inst => text.toLowerCase().includes(inst.name.toLowerCase()) || text.toLowerCase().includes(inst.code.toLowerCase()));
+  const lowerText = text.toLowerCase();
+  const instMatch = INSTITUTIONS.find(inst => {
+    const cleanName = inst.name.toLowerCase().replace(/\s*\([^)]*\)/g, "").trim();
+    return lowerText.includes(inst.name.toLowerCase()) ||
+      lowerText.includes(cleanName) ||
+      (inst.code && lowerText.includes(inst.code.toLowerCase()));
+  });
   if (instMatch) {
     extracted.institution = instMatch.name;
     if (instMatch.level) extracted.level = instMatch.level;

@@ -1205,8 +1205,22 @@ app.post("/api/helb/login", async (req, res) => {
     const result = await helbLogin(userIdentifier, password);
 
     // If explicit invalid credentials or error
-    if (!result.ok && !result.network_error && result.message && !result.message.includes("offline")) {
-      return res.status(401).json(result);
+    if (!result.ok) {
+      if (result.network_error) {
+        return res.status(503).json({
+          ok: false,
+          success: false,
+          network_error: true,
+          message: result.message || "The HELB/HEF portal is currently offline or unreachable. Please try again later.",
+          snapshot: result.snapshot || null
+        });
+      }
+      return res.status(401).json({
+        ok: false,
+        success: false,
+        message: result.message || "Invalid login credentials for HEF portal.",
+        snapshot: result.snapshot || null
+      });
     }
 
     // Construct profile strictly from actual scraped DOM data
@@ -1225,21 +1239,7 @@ app.post("/api/helb/login", async (req, res) => {
       loginTime: Date.now(),
     });
 
-    if (result.ok) {
-      return res.status(200).json(result);
-    }
-
-    // If network error occurred during navigation
-    return res.status(200).json({
-      ok: true,
-      success: true,
-      message: "Login successful (HEF Portal Session Established).",
-      sessionToken,
-      dataIntegrityWarning: profile.dataIntegrityWarning || false,
-      warningDetail: profile.warningDetail || null,
-      profile,
-      scrapedData: result.scrapedData || null
-    });
+    return res.status(200).json(result);
   } catch (err) {
     console.error("[api/helb/login] Server Error:", err);
     return res.status(500).json({

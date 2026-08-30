@@ -382,6 +382,45 @@ async function runTests() {
   await browser.close();
 
   // ─────────────────────────────────────────────────────────────────────────
+  // TEST GROUP 5: Conversational Entity Extraction & Zero Guessing
+  // ─────────────────────────────────────────────────────────────────────────
+  console.log("\n--- Test Group 5: Conversational Details Extraction & Zero Guessing ---");
+
+  test("Extracts user provided National ID, KCSE index, Band, Institution, and Programme", () => {
+    const text = "My name is Brian Kipkorir, national ID: 38472910, studying Computer Science at University of Nairobi, I am in Band 2, year 3 semester 1, kcse index: 12345678001/2021";
+    const extracted = hefEngine.extractUserDetailsFromText(text);
+
+    assert.strictEqual(extracted.name, "Brian Kipkorir");
+    assert.strictEqual(extracted.nationalId, "38472910");
+    assert.strictEqual(extracted.kcseIndex, "12345678001/2021");
+    assert.strictEqual(extracted.band, 2);
+    assert.strictEqual(extracted.yearOfStudy, 3);
+    assert.strictEqual(extracted.currentSemester, 1);
+    assert.ok(extracted.institution.includes("University of Nairobi"));
+    assert.ok(extracted.programme.includes("Computer Science"));
+  });
+
+  test("Does not extract random numbers or Paybill as National ID", () => {
+    const text = "Paybill 200800 repayment amount 50000";
+    const extracted = hefEngine.extractUserDetailsFromText(text);
+    assert.strictEqual(extracted.nationalId, undefined);
+  });
+
+  test("resolveHefProfile does not invent fake details when fields are missing", () => {
+    const profile = hefEngine.resolveHefProfile({
+      credential: "student@example.com"
+    });
+
+    assert.strictEqual(profile.student.nationalId, "Data not found");
+    assert.strictEqual(profile.student.institution, "Data not found");
+    assert.strictEqual(profile.student.programme, "Data not found");
+    assert.strictEqual(profile.student.kcseIndex, "Data not found");
+    assert.strictEqual(profile.funding.band, null);
+    assert.strictEqual(profile.funding.cumulative.outstandingBalance, null);
+    assert.deepStrictEqual(profile.disbursements, []);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
   // SUMMARY
   // ─────────────────────────────────────────────────────────────────────────
   console.log("\n===============================================================================");

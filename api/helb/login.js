@@ -197,20 +197,19 @@ module.exports = async (req, res) => {
       });
     }
 
-    // If explicit invalid password or rejection
-    if (!result.ok && result.message && (result.message.includes("password") || result.message.includes("exist") || result.message.includes("deactivated"))) {
-      return res.status(401).json(result);
+    if (result.network_error || result.error) {
+      return res.status(503).json({
+        ok: false,
+        success: false,
+        network_error: true,
+        message: result.message || "The HELB/HEF portal is currently offline or unreachable. Please try again later."
+      });
     }
 
-    // Session established with profile
-    return res.status(200).json({
-      ok: true,
-      success: true,
-      sessionToken: `hef-sess-${Date.now().toString(36)}`,
-      message: "Login successful (HEF Portal Session Established).",
-      dataIntegrityWarning: profile?.dataIntegrityWarning || false,
-      warningDetail: profile?.warningDetail || null,
-      profile
+    return res.status(401).json({
+      ok: false,
+      success: false,
+      message: result.message || "Invalid HEF portal credentials."
     });
   } catch (err) {
     return res.status(500).json({ ok: false, success: false, message: "Server error", error: err.message });
