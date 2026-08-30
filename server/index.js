@@ -12,6 +12,7 @@ const path = require("path");
 const https = require("https");
 const http = require("http");
 const querystring = require("querystring");
+const crypto = require("crypto");
 const fs = require("fs-extra");
 const { chromium } = require("playwright-extra");
 const stealth = require("puppeteer-extra-plugin-stealth")();
@@ -45,6 +46,28 @@ fs.ensureDirSync(SCREENSHOTS_DIR);
 
 // In-memory active session store for verified portal sessions
 const ACTIVE_SESSIONS = new Map();
+
+// In-memory active session store for pending OTP verification sessions
+// Key: otpSessionId -> Value: { otpSessionId, browser, ctx, page, mousePos, capturedProfileData, capturedAllocationData, capturedResponses, email, timer, createdAt }
+const OTP_SESSIONS = new Map();
+
+/**
+ * Clean up and close browser resources for an OTP session
+ */
+async function cleanupOtpSession(otpSessionId) {
+  const session = OTP_SESSIONS.get(otpSessionId);
+  if (!session) return;
+  OTP_SESSIONS.delete(otpSessionId);
+  if (session.timer) clearTimeout(session.timer);
+  try {
+    if (session.page && !session.page.isClosed()) await session.page.close().catch(() => {});
+    if (session.ctx) await session.ctx.close().catch(() => {});
+    if (session.browser) await session.browser.close().catch(() => {});
+    console.log(`[otp-session] Successfully cleaned up and closed browser for OTP session: ${otpSessionId}`);
+  } catch (err) {
+    console.warn(`[otp-session] Error closing browser for OTP session ${otpSessionId}:`, err.message);
+  }
+}
 
 /**
  * Validate Kenyan National ID or Email format
@@ -828,6 +851,146 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. Resilient Playwright Automation & Strict DOM Extraction Engine
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Reusable scraping and data extraction engine for an authenticated Playwright session.
+ * Used identically for both standard credential logins and completed OTP challenges.
+ */
+async function scrapeHefPortalSession(
+  page,
+  ctx,
+  email,
+  capturedProfileData = {},
+  capturedAllocationData = {},
+  capturedResponses = [],
+  mousePos = { x: 250, y: 200 }
+) {
+  // Wait for redirect to portal application dashboard
+  await page.waitForURL(url => !url.toString().includes("auth/signin") && !url.toString().includes("auth/otp") && !url.toString().endsWith(".ke/"), { timeout: 15000 }).catch(() => {});
+  await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+  
+  // Human-like reading pause and smooth scrolling on initial dashboard
+  await human.humanPause(1200, 2400);
+  await human.humanScroll(page, 350);
+
+  // Systematic human exploration of HEF portal sub-routes
+  let accumulatedPageText = "";
+  try {
+    const initialText = await page.locator("body").innerText().catch(async () => await page.evaluate(() => document.body.innerText).catch(() => ""));
+    if (initialText) accumulatedPageText += "\n" + initialText;
+  } catch (_) {}
+
+  // Sub-routes that humans visit to access student details, allocations, statements, and clearance
+  const portalSubPages = [
+    { name: "Profile & Personal Details", url: `${PORTAL_BASE_URL}/account/index/frm_profile`, menuLink: 'a[href*="frm_profile"], a:has-text("My Card"), a:has-text("Profile")' },
+    { name: "Academic & Institution Details", url: `${PORTAL_BASE_URL}/nfm/index/frm_update_details`, menuLink: 'a[href*="frm_update_details"], a:has-text("Update Profile")' },
+    { name: "My Loans & Scholarships", url: `${PORTAL_BASE_URL}/service/index/frm_loans`, menuLink: 'a[href*="frm_loans"], a:has-text("My Loans")' },
+    { name: "HELB Loan Statement & Ledger", url: `${PORTAL_BASE_URL}/service/index/frm_loan_statement`, menuLink: 'a[href*="frm_loan_statement"], a:has-text("Loan Statement")' },
+    { name: "Loan Repayment & Paybill", url: `${PORTAL_BASE_URL}/service/index/frm_loan_repayment`, menuLink: 'a[href*="frm_loan_repayment"], a:has-text("Loan Repayment")' },
+    { name: "Clearance & Compliance", url: `${PORTAL_BASE_URL}/service/index/frm_clr_cert`, menuLink: 'a[href*="frm_clr_cert"], a:has-text("Clearance Certificate")' }
+  ];
+
+  console.log("[playwright-scraper] Initiating human browsing of portal sub-routes to extract full student financing records…");
+  for (const subPage of portalSubPages) {
+    try {
+      console.log(`[playwright-scraper] 🖱️ Human navigating to: ${subPage.name}…`);
+      
+      let navigatedViaClick = false;
+      const linkLoc = page.locator(subPage.menuLink).first();
+      if (await linkLoc.isVisible({ timeout: 600 }).catch(() => false)) {
+        navigatedViaClick = await human.humanClick(page, linkLoc, mousePos);
+      }
+
+      if (!navigatedViaClick) {
+        await page.goto(subPage.url, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+      }
+
+      await page.waitForLoadState("networkidle", { timeout: 6000 }).catch(() => {});
+      await human.humanPause(800, 1500); // Human reading delay
+      await human.humanScroll(page, 400); // Human scrolling to view table/form data
+
+      // Collect page text for regex parsing
+      const pageText = await page.locator("body").innerText().catch(async () => await page.evaluate(() => document.body.innerText).catch(() => ""));
+      if (pageText) accumulatedPageText += "\n" + pageText;
+    } catch (subErr) {
+      console.warn(`[playwright-scraper] Sub-page navigation notice for ${subPage.name}:`, subErr.message);
+    }
+  }
+
+  // Check session cookies
+  const cookies = await ctx.cookies();
+  const sessionCookie = cookies.find(
+    c => c.name.toLowerCase().includes("session") || c.name.toLowerCase().includes("token")
+  );
+  const pageTitle = await page.title().catch(() => "");
+
+  // ── DYNAMIC REGEX / FULL-TEXT FALLBACK & DOM SCRAPING ──
+  const apiData = hefEngine.extractDataFromCapturedJson(capturedProfileData, capturedResponses);
+  const domData = await scrapeDashboardFromPage(page);
+  const regexData = hefEngine.extractDataFromPageRegex(accumulatedPageText);
+
+  // ── CONSTRUCT FINAL MERGED RESPONSE ──
+  const scrapedData = {
+    name: apiData.name || domData.name || regexData.name || null,
+    nationalId: apiData.nationalId || domData.nationalId || regexData.nationalId || (/^\d{5,10}$/.test(email) ? email : null) || null,
+    email: apiData.email || domData.email || (email && email.includes("@") ? email : null) || null,
+    phone: apiData.phone || domData.phone || regexData.phone || null,
+    kcseIndex: apiData.kcseIndex || domData.kcseIndex || regexData.kcseIndex || null,
+    institution: apiData.institution || domData.institution || regexData.institution || null,
+    programme: apiData.programme || domData.programme || regexData.programme || null,
+    level: apiData.level || domData.level || regexData.level || null,
+    band: apiData.bandName || domData.band || regexData.bandName || (apiData.band ? `Band ${apiData.band}` : (regexData.band ? `Band ${regexData.band}` : null)),
+    bandNum: apiData.bandNum || domData.bandNum || regexData.bandNum || apiData.band || regexData.band || null,
+    outstandingDue: apiData.outstandingDue || domData.outstandingDue || regexData.outstandingDue || null,
+    loanAwarded: apiData.loanAwarded || domData.loanAwarded || regexData.loanAwarded || null,
+    scholarshipAmount: apiData.scholarshipAmount || domData.scholarshipAmount || regexData.scholarshipAmount || null,
+    tuitionLoan: apiData.tuitionLoan || domData.tuitionLoan || regexData.tuitionLoan || null,
+    upkeepLoan: apiData.upkeepLoan || domData.upkeepLoan || regexData.upkeepLoan || null,
+    householdFee: apiData.householdFee || domData.householdFee || regexData.householdFee || null,
+    totalRepaid: apiData.totalRepaid !== undefined ? apiData.totalRepaid : (domData.totalRepaid !== undefined ? domData.totalRepaid : (regexData.totalRepaid !== undefined ? regexData.totalRepaid : 0)),
+    yearOfStudy: apiData.yearOfStudy || domData.yearOfStudy || regexData.yearOfStudy || null,
+    currentSemester: apiData.currentSemester || domData.currentSemester || regexData.currentSemester || null,
+    academicYear: apiData.academicYear || domData.academicYear || regexData.academicYear || null,
+    bankName: apiData.bankName || domData.bankName || regexData.bankName || null,
+    accountNumber: apiData.accountNumber || domData.accountNumber || regexData.accountNumber || null,
+    county: apiData.county || domData.county || regexData.county || null,
+    subCounty: apiData.subCounty || domData.subCounty || regexData.subCounty || null,
+    constituency: apiData.constituency || domData.constituency || regexData.constituency || null,
+    dob: apiData.dob || domData.dob || regexData.dob || null,
+    gender: apiData.gender || domData.gender || regexData.gender || null,
+    registrationNumber: apiData.registrationNumber || domData.registrationNumber || regexData.registrationNumber || null,
+    applicationStatus: apiData.applicationStatus || domData.applicationStatus || regexData.applicationStatus || null,
+    applicationRef: apiData.applicationRef || domData.applicationRef || regexData.applicationRef || null,
+    disbursements: (apiData.disbursements && apiData.disbursements.length > 0) ? apiData.disbursements : (domData.disbursements && domData.disbursements.length > 0 ? domData.disbursements : []),
+    capturedApiData: apiData,
+    extractionAudit: domData.extractionAudit || {}
+  };
+
+  const integrity = hefEngine.evaluateDataIntegrity(scrapedData, domData.extractionAudit);
+
+  console.log("[playwright-login] ✅ Human-like deep scraping completed. Final verified attributes:", JSON.stringify({
+    name: scrapedData.name || "Data not found",
+    nationalId: scrapedData.nationalId || "Data not found",
+    institution: scrapedData.institution || "Data not found",
+    band: scrapedData.band || "Data not found",
+    kcseIndex: scrapedData.kcseIndex || "Data not found",
+    outstandingDue: scrapedData.outstandingDue || "Data not found",
+    dataIntegrityWarning: integrity.dataIntegrityWarning
+  }));
+
+  return {
+    ok: true,
+    success: true,
+    message: "Login successful.",
+    sessionToken: sessionCookie?.value || "portal-session-authenticated",
+    pageTitle: pageTitle || "HEF Portal Dashboard",
+    dataIntegrityWarning: integrity.dataIntegrityWarning,
+    warningDetail: integrity.warningDetail,
+    integrity,
+    scrapedData
+  };
+}
+
 async function playwrightHefLogin(email, password) {
   const isDebugVisible = process.env.DEBUG_VISIBLE === "true";
   console.log(`[playwright-login] Starting human-simulated Playwright browser (visible: ${isDebugVisible}) for user: ${email}…`);
@@ -892,6 +1055,8 @@ async function playwrightHefLogin(email, password) {
       }
     }
   });
+
+  let keepBrowserOpen = false;
 
   try {
     console.log(`[playwright-login] Navigating to ${PORTAL_BASE_URL} with human pacing…`);
@@ -964,11 +1129,18 @@ async function playwrightHefLogin(email, password) {
 
     // Check if portal displayed error in DOM
     await human.humanPause(400, 800);
-    const msgEl = page.locator('.message, .alert-danger, #msg, .toastr').first();
+    const msgEl = page.locator('.message, .alert-danger, #msg, .toastr, .text-danger, .invalid-feedback').first();
     if (await msgEl.isVisible({ timeout: 2000 }).catch(() => false)) {
       const errorText = await msgEl.textContent().catch(() => "");
       const cleanErr = errorText.replace("Processing please wait..!", "").trim();
-      if (cleanErr && cleanErr.length > 2 && !cleanErr.includes("Processing")) {
+      if (
+        cleanErr &&
+        cleanErr.length > 2 &&
+        !cleanErr.includes("Processing") &&
+        !cleanErr.toLowerCase().includes("otp") &&
+        !cleanErr.toLowerCase().includes("verification") &&
+        !cleanErr.toLowerCase().includes("code")
+      ) {
         const snap = await captureSnapshot(page, "login-error");
         return {
           ok: false,
@@ -983,140 +1155,128 @@ async function playwrightHefLogin(email, password) {
     if (ajaxResponseData) {
       try {
         const parsed = JSON.parse(ajaxResponseData.trim());
-        const info = parsed.info || "";
+        const info = (parsed.info || "").toLowerCase();
         if (info === "warning") {
           return { ok: false, success: false, message: "The password entered is incorrect." };
         }
         if (info === "email_error" || info === "id_error") {
           return { ok: false, success: false, message: "A user with those credentials does not exist in the HEF system." };
         }
+        if (info === "deactivated" || info === "user_ban") {
+          return { ok: false, success: false, message: "Your HEF account is currently deactivated or restricted. Please contact HELB/HEF support." };
+        }
       } catch (_) {}
     }
 
-    // Wait for redirect to portal application dashboard
-    await page.waitForURL(url => !url.toString().includes("auth/signin") && !url.toString().endsWith(".ke/"), { timeout: 15000 }).catch(() => {});
-    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
-    
-    // Human-like reading pause and smooth scrolling on initial dashboard
-    await human.humanPause(1200, 2400);
-    await human.humanScroll(page, 350);
-
-    // ── 2. SYSTEMATIC HUMAN EXPLORATION OF HEF PORTAL SUB-ROUTES ──
-    let accumulatedPageText = "";
-    try {
-      const initialText = await page.locator("body").innerText().catch(async () => await page.evaluate(() => document.body.innerText).catch(() => ""));
-      if (initialText) accumulatedPageText += "\n" + initialText;
-    } catch (_) {}
-
-    // Sub-routes that humans visit to access student details, allocations, statements, and clearance
-    const portalSubPages = [
-      { name: "Profile & Personal Details", url: `${PORTAL_BASE_URL}/account/index/frm_profile`, menuLink: 'a[href*="frm_profile"], a:has-text("My Card"), a:has-text("Profile")' },
-      { name: "Academic & Institution Details", url: `${PORTAL_BASE_URL}/nfm/index/frm_update_details`, menuLink: 'a[href*="frm_update_details"], a:has-text("Update Profile")' },
-      { name: "My Loans & Scholarships", url: `${PORTAL_BASE_URL}/service/index/frm_loans`, menuLink: 'a[href*="frm_loans"], a:has-text("My Loans")' },
-      { name: "HELB Loan Statement & Ledger", url: `${PORTAL_BASE_URL}/service/index/frm_loan_statement`, menuLink: 'a[href*="frm_loan_statement"], a:has-text("Loan Statement")' },
-      { name: "Loan Repayment & Paybill", url: `${PORTAL_BASE_URL}/service/index/frm_loan_repayment`, menuLink: 'a[href*="frm_loan_repayment"], a:has-text("Loan Repayment")' },
-      { name: "Clearance & Compliance", url: `${PORTAL_BASE_URL}/service/index/frm_clr_cert`, menuLink: 'a[href*="frm_clr_cert"], a:has-text("Clearance Certificate")' }
+    // ── Check if portal redirected or challenged with OTP / 2FA verification ──
+    const otpInputSelectors = [
+      '#form-otp input',
+      'input[name*="otp" i]',
+      'input[id*="otp" i]',
+      'input[name*="code" i]',
+      'input[id*="code" i]',
+      'input[name*="verification" i]',
+      'input[id*="verification" i]',
+      'input[name*="token" i]',
+      'input[id*="token" i]',
+      'input[placeholder*="otp" i]',
+      'input[placeholder*="code" i]',
+      'input[placeholder*="verification" i]',
+      'input[autocomplete="one-time-code"]',
+      '.otp-input',
+      '#otp',
+      '#verification_code',
+      '#code'
     ];
 
-    console.log("[playwright-scraper] Initiating human browsing of portal sub-routes to extract full student financing records…");
-    for (const subPage of portalSubPages) {
-      try {
-        console.log(`[playwright-scraper] 🖱️ Human navigating to: ${subPage.name}…`);
-        
-        let navigatedViaClick = false;
-        const linkLoc = page.locator(subPage.menuLink).first();
-        if (await linkLoc.isVisible({ timeout: 600 }).catch(() => false)) {
-          navigatedViaClick = await human.humanClick(page, linkLoc, mousePos);
-        }
+    let requiresOtp = false;
+    let otpMessage = "Enter the OTP sent to your phone/email.";
 
-        if (!navigatedViaClick) {
-          await page.goto(subPage.url, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
-        }
-
-        await page.waitForLoadState("networkidle", { timeout: 6000 }).catch(() => {});
-        await human.humanPause(800, 1500); // Human reading delay
-        await human.humanScroll(page, 400); // Human scrolling to view table/form data
-
-        // Collect page text for regex parsing
-        const pageText = await page.locator("body").innerText().catch(async () => await page.evaluate(() => document.body.innerText).catch(() => ""));
-        if (pageText) accumulatedPageText += "\n" + pageText;
-      } catch (subErr) {
-        console.warn(`[playwright-scraper] Sub-page navigation notice for ${subPage.name}:`, subErr.message);
-      }
+    // 1. Check URL
+    const currentUrl = page.url().toLowerCase();
+    if (currentUrl.includes("/otp") || currentUrl.includes("verify_otp") || currentUrl.includes("/verify") || currentUrl.includes("two_factor") || currentUrl.includes("2fa")) {
+      requiresOtp = true;
     }
 
-    // Check session cookies
-    const cookies = await ctx.cookies();
-    const sessionCookie = cookies.find(
-      c => c.name.toLowerCase().includes("session") || c.name.toLowerCase().includes("token")
+    // 2. Check AJAX response info
+    if (ajaxResponseData) {
+      try {
+        const parsed = JSON.parse(ajaxResponseData.trim());
+        const info = (parsed.info || "").toLowerCase();
+        if (info === "otp" || info === "verify_otp" || info === "2fa" || info === "two_factor" || info === "two-factor" || info === "verification_code" || info === "verify") {
+          requiresOtp = true;
+          if (parsed.message) otpMessage = parsed.message;
+        }
+      } catch (_) {}
+    }
+
+    // 3. Check for OTP input field in DOM
+    if (!requiresOtp) {
+      try {
+        const otpEl = page.locator(otpInputSelectors.join(", ")).first();
+        if (await otpEl.isVisible({ timeout: 2500 }).catch(() => false)) {
+          requiresOtp = true;
+        }
+      } catch (_) {}
+    }
+
+    // 4. Check for OTP text patterns on page
+    if (!requiresOtp) {
+      try {
+        const bodyText = await page.locator("body").innerText().catch(() => "");
+        if (
+          /enter (the )?(otp|verification code|one[- ]time (pin|password)|security code)/i.test(bodyText) ||
+          /a verification code has been sent|an otp has been sent|enter the code sent to/i.test(bodyText) ||
+          /otp verification|two[- ]factor authentication|2fa verification/i.test(bodyText)
+        ) {
+          requiresOtp = true;
+        }
+      } catch (_) {}
+    }
+
+    if (requiresOtp) {
+      const otpSessionId = `otp_${Date.now().toString(36)}_${crypto.randomBytes(6).toString("hex")}`;
+      console.log(`[playwright-login] 📱 OTP Challenge detected on HEF portal! Session ID: ${otpSessionId}`);
+
+      const cleanupTimer = setTimeout(async () => {
+        console.log(`[otp-session] Session ${otpSessionId} expired after 5 minutes. Closing browser.`);
+        await cleanupOtpSession(otpSessionId);
+      }, 5 * 60 * 1000);
+
+      OTP_SESSIONS.set(otpSessionId, {
+        otpSessionId,
+        browser,
+        ctx,
+        page,
+        mousePos,
+        capturedProfileData,
+        capturedAllocationData,
+        capturedResponses,
+        email,
+        timer: cleanupTimer,
+        createdAt: Date.now()
+      });
+
+      keepBrowserOpen = true;
+
+      return {
+        ok: false,
+        requiresOtp: true,
+        otpSessionId,
+        message: otpMessage
+      };
+    }
+
+    // Standard login path: perform deep scraping and extraction
+    return await scrapeHefPortalSession(
+      page,
+      ctx,
+      email,
+      capturedProfileData,
+      capturedAllocationData,
+      capturedResponses,
+      mousePos
     );
-    const pageTitle = await page.title().catch(() => "");
-
-    // ── 3. DYNAMIC REGEX / FULL-TEXT FALLBACK & DOM SCRAPING ──
-    const apiData = hefEngine.extractDataFromCapturedJson(capturedProfileData, capturedResponses);
-    const domData = await scrapeDashboardFromPage(page);
-    const regexData = hefEngine.extractDataFromPageRegex(accumulatedPageText);
-
-    // ── 4. CONSTRUCT FINAL MERGED RESPONSE ──
-    const scrapedData = {
-      name: apiData.name || domData.name || regexData.name || null,
-      nationalId: apiData.nationalId || domData.nationalId || regexData.nationalId || (/^\d{5,10}$/.test(email) ? email : null) || null,
-      email: apiData.email || domData.email || (email && email.includes("@") ? email : null) || null,
-      phone: apiData.phone || domData.phone || regexData.phone || null,
-      kcseIndex: apiData.kcseIndex || domData.kcseIndex || regexData.kcseIndex || null,
-      institution: apiData.institution || domData.institution || regexData.institution || null,
-      programme: apiData.programme || domData.programme || regexData.programme || null,
-      level: apiData.level || domData.level || regexData.level || null,
-      band: apiData.bandName || domData.band || regexData.bandName || (apiData.band ? `Band ${apiData.band}` : (regexData.band ? `Band ${regexData.band}` : null)),
-      bandNum: apiData.bandNum || domData.bandNum || regexData.bandNum || apiData.band || regexData.band || null,
-      outstandingDue: apiData.outstandingDue || domData.outstandingDue || regexData.outstandingDue || null,
-      loanAwarded: apiData.loanAwarded || domData.loanAwarded || regexData.loanAwarded || null,
-      scholarshipAmount: apiData.scholarshipAmount || domData.scholarshipAmount || regexData.scholarshipAmount || null,
-      tuitionLoan: apiData.tuitionLoan || domData.tuitionLoan || regexData.tuitionLoan || null,
-      upkeepLoan: apiData.upkeepLoan || domData.upkeepLoan || regexData.upkeepLoan || null,
-      householdFee: apiData.householdFee || domData.householdFee || regexData.householdFee || null,
-      totalRepaid: apiData.totalRepaid !== undefined ? apiData.totalRepaid : (domData.totalRepaid !== undefined ? domData.totalRepaid : (regexData.totalRepaid !== undefined ? regexData.totalRepaid : 0)),
-      yearOfStudy: apiData.yearOfStudy || domData.yearOfStudy || regexData.yearOfStudy || null,
-      currentSemester: apiData.currentSemester || domData.currentSemester || regexData.currentSemester || null,
-      academicYear: apiData.academicYear || domData.academicYear || regexData.academicYear || null,
-      bankName: apiData.bankName || domData.bankName || regexData.bankName || null,
-      accountNumber: apiData.accountNumber || domData.accountNumber || regexData.accountNumber || null,
-      county: apiData.county || domData.county || regexData.county || null,
-      subCounty: apiData.subCounty || domData.subCounty || regexData.subCounty || null,
-      constituency: apiData.constituency || domData.constituency || regexData.constituency || null,
-      dob: apiData.dob || domData.dob || regexData.dob || null,
-      gender: apiData.gender || domData.gender || regexData.gender || null,
-      registrationNumber: apiData.registrationNumber || domData.registrationNumber || regexData.registrationNumber || null,
-      applicationStatus: apiData.applicationStatus || domData.applicationStatus || regexData.applicationStatus || null,
-      applicationRef: apiData.applicationRef || domData.applicationRef || regexData.applicationRef || null,
-      disbursements: (apiData.disbursements && apiData.disbursements.length > 0) ? apiData.disbursements : (domData.disbursements && domData.disbursements.length > 0 ? domData.disbursements : []),
-      capturedApiData: apiData,
-      extractionAudit: domData.extractionAudit || {}
-    };
-
-    const integrity = hefEngine.evaluateDataIntegrity(scrapedData, domData.extractionAudit);
-
-    console.log("[playwright-login] ✅ Human-like deep scraping completed. Final verified attributes:", JSON.stringify({
-      name: scrapedData.name || "Data not found",
-      nationalId: scrapedData.nationalId || "Data not found",
-      institution: scrapedData.institution || "Data not found",
-      band: scrapedData.band || "Data not found",
-      kcseIndex: scrapedData.kcseIndex || "Data not found",
-      outstandingDue: scrapedData.outstandingDue || "Data not found",
-      dataIntegrityWarning: integrity.dataIntegrityWarning
-    }));
-
-    return {
-      ok: true,
-      success: true,
-      message: "Login successful.",
-      sessionToken: sessionCookie?.value || "portal-session-authenticated",
-      pageTitle: pageTitle || "HEF Portal Dashboard",
-      dataIntegrityWarning: integrity.dataIntegrityWarning,
-      warningDetail: integrity.warningDetail,
-      integrity,
-      scrapedData
-    };
 
   } catch (err) {
     console.error("[playwright-login] ❌ Error:", err.message);
@@ -1132,8 +1292,10 @@ async function playwrightHefLogin(email, password) {
       snapshot: snap,
     };
   } finally {
-    await ctx.close().catch(() => {});
-    await browser.close().catch(() => {});
+    if (!keepBrowserOpen) {
+      await ctx.close().catch(() => {});
+      await browser.close().catch(() => {});
+    }
   }
 }
 
@@ -1278,6 +1440,16 @@ app.post("/api/helb/login", async (req, res) => {
   try {
     const result = await helbLogin(userIdentifier, password);
 
+    // If OTP challenge was detected on the portal
+    if (result && result.requiresOtp) {
+      return res.status(200).json({
+        ok: false,
+        requiresOtp: true,
+        otpSessionId: result.otpSessionId,
+        message: result.message || "Enter the OTP sent to your phone/email.",
+      });
+    }
+
     // If explicit invalid credentials or error
     if (!result.ok) {
       if (result.network_error) {
@@ -1340,18 +1512,215 @@ function getRequestProfile(req) {
 
 /**
  * POST /api/helb/otp
+ * Body: { otp: string, otpSessionId?: string, sessionToken?: string, credential?: string, email?: string, nationalId?: string }
  */
 app.post("/api/helb/otp", async (req, res) => {
-  const { sessionToken, otp } = req.body || {};
-  if (!otp) {
-    return res.status(400).json({ ok: false, message: "Please provide the OTP code sent to your phone." });
+  const { otp, otpSessionId, sessionToken } = req.body || {};
+  const sessionId = (otpSessionId || sessionToken || "").trim();
+  const cleanOtp = (otp || "").trim();
+
+  console.log(`[api/helb/otp] Received OTP verification request for session "${sessionId}"`);
+
+  if (!cleanOtp) {
+    return res.status(400).json({
+      ok: false,
+      success: false,
+      message: "Please provide the OTP code sent to your phone or email."
+    });
   }
-  return res.json({
-    ok: true,
-    success: true,
-    message: "OTP verified successfully.",
-    sessionToken: sessionToken || "verified-otp-session",
-  });
+
+  if (!sessionId) {
+    return res.status(400).json({
+      ok: false,
+      success: false,
+      message: "OTP session ID is required."
+    });
+  }
+
+  const session = OTP_SESSIONS.get(sessionId);
+  if (!session) {
+    return res.status(400).json({
+      ok: false,
+      success: false,
+      message: "OTP verification session has expired or is invalid. Please log in again."
+    });
+  }
+
+  const { page, ctx, browser, mousePos, capturedProfileData, capturedAllocationData, capturedResponses, email } = session;
+
+  try {
+    // 1. Locate OTP input field on portal
+    const otpInputSelectors = [
+      '#form-otp input',
+      'input[name*="otp" i]',
+      'input[id*="otp" i]',
+      'input[name*="code" i]',
+      'input[id*="code" i]',
+      'input[name*="verification" i]',
+      'input[id*="verification" i]',
+      'input[name*="token" i]',
+      'input[id*="token" i]',
+      'input[placeholder*="otp" i]',
+      'input[placeholder*="code" i]',
+      'input[placeholder*="verification" i]',
+      'input[autocomplete="one-time-code"]',
+      '.otp-input',
+      '#otp',
+      '#verification_code',
+      '#code',
+      'input[type="text"]',
+      'input[type="number"]'
+    ];
+
+    const otpInput = page.locator(otpInputSelectors.join(", ")).first();
+    const isVisible = await otpInput.isVisible({ timeout: 8000 }).catch(() => false);
+
+    if (!isVisible) {
+      console.warn(`[api/helb/otp] OTP input field not found on portal for session ${sessionId}`);
+      await cleanupOtpSession(sessionId);
+      return res.status(400).json({
+        ok: false,
+        success: false,
+        message: "The OTP input form is no longer visible on the portal. Please log in again."
+      });
+    }
+
+    // 2. Type OTP with human cadence
+    console.log(`[api/helb/otp] Entering OTP into portal input field with human cadence…`);
+    await human.humanType(page, otpInput, cleanOtp, mousePos, { clearFirst: true });
+    await human.humanPause(250, 600);
+
+    // 3. Locate and click OTP submit / verify button
+    const submitBtnSelectors = [
+      '#form-otp button[type="submit"]',
+      'button[type="submit"]:has-text("Verify")',
+      'button:has-text("Verify")',
+      'button:has-text("Submit OTP")',
+      'button:has-text("Submit")',
+      'button:has-text("Confirm")',
+      'button:has-text("Validate")',
+      'button:has-text("Proceed")',
+      'button:has-text("Continue")',
+      '.btn-otp',
+      '#btn-otp',
+      'button[type="submit"]',
+      'input[type="submit"]'
+    ];
+
+    const submitBtn = page.locator(submitBtnSelectors.join(", ")).first();
+
+    let otpAjaxResponse = null;
+    const responsePromise = page.waitForResponse(
+      resp => resp.url().includes("otp") || resp.url().includes("verify") || resp.url().includes("auth") || resp.url().includes("signin"),
+      { timeout: 20000 }
+    ).then(async resp => {
+      try {
+        otpAjaxResponse = await resp.text();
+      } catch (_) {}
+    }).catch(() => null);
+
+    console.log(`[api/helb/otp] Clicking OTP verification submit button…`);
+    await human.humanClick(page, submitBtn, mousePos);
+
+    await Promise.race([
+      responsePromise,
+      page.waitForTimeout(5000)
+    ]);
+
+    await human.humanPause(500, 1000);
+
+    // 4. Check for error message in DOM
+    const msgEl = page.locator('.message, .alert-danger, #msg, .toastr, .text-danger, .invalid-feedback, .alert').first();
+    if (await msgEl.isVisible({ timeout: 2500 }).catch(() => false)) {
+      const errorText = await msgEl.textContent().catch(() => "");
+      const cleanErr = errorText.replace("Processing please wait..!", "").trim();
+      if (
+        cleanErr &&
+        cleanErr.length > 2 &&
+        !cleanErr.includes("Processing") &&
+        !cleanErr.toLowerCase().includes("success") &&
+        !cleanErr.toLowerCase().includes("redirecting")
+      ) {
+        console.warn(`[api/helb/otp] Portal returned OTP error in DOM: "${cleanErr}"`);
+        await cleanupOtpSession(sessionId);
+        return res.status(401).json({
+          ok: false,
+          success: false,
+          message: cleanErr
+        });
+      }
+    }
+
+    // 5. Parse AJAX response for OTP error
+    if (otpAjaxResponse) {
+      try {
+        const parsed = JSON.parse(otpAjaxResponse.trim());
+        const info = (parsed.info || "").toLowerCase();
+        if (info === "warning" || info === "error" || info === "otp_error" || info === "invalid_otp" || parsed.status === "error" || parsed.success === false) {
+          const errMsg = parsed.message || parsed.msg || "The OTP entered is incorrect or has expired.";
+          console.warn(`[api/helb/otp] Portal rejected OTP via AJAX: ${errMsg}`);
+          await cleanupOtpSession(sessionId);
+          return res.status(401).json({
+            ok: false,
+            success: false,
+            message: errMsg
+          });
+        }
+      } catch (_) {}
+    }
+
+    // 6. Run the authentic scraping flow (reusing scrapeHefPortalSession)
+    console.log(`[api/helb/otp] OTP accepted! Running full portal DOM scraping & student data extraction…`);
+    const scrapeResult = await scrapeHefPortalSession(
+      page,
+      ctx,
+      email,
+      capturedProfileData,
+      capturedAllocationData,
+      capturedResponses,
+      mousePos
+    );
+
+    // 7. Cleanup browser resources now that scraping has finished
+    await cleanupOtpSession(sessionId);
+
+    if (!scrapeResult.ok) {
+      return res.status(500).json({
+        ok: false,
+        success: false,
+        message: scrapeResult.message || "Failed to retrieve student records after OTP verification."
+      });
+    }
+
+    // 8. Construct profile and save active session
+    const userIdentifier = (email || req.body?.credential || req.body?.nationalId || "").trim();
+    const profile = buildResponseProfile(scrapeResult.scrapedData, req.body, userIdentifier);
+    scrapeResult.profile = profile;
+    scrapeResult.dataIntegrityWarning = profile.dataIntegrityWarning !== undefined ? profile.dataIntegrityWarning : (scrapeResult.dataIntegrityWarning || false);
+    scrapeResult.warningDetail = profile.warningDetail || scrapeResult.warningDetail || null;
+
+    const verifiedSessionToken = scrapeResult.sessionToken || `hef-sess-${Date.now().toString(36)}`;
+    if (userIdentifier) {
+      ACTIVE_SESSIONS.set(userIdentifier, {
+        identifier: userIdentifier,
+        sessionToken: verifiedSessionToken,
+        scrapedData: scrapeResult.scrapedData || {},
+        profile,
+        loginTime: Date.now(),
+      });
+    }
+
+    return res.status(200).json(scrapeResult);
+
+  } catch (err) {
+    console.error(`[api/helb/otp] Error during OTP verification:`, err);
+    await cleanupOtpSession(sessionId);
+    return res.status(500).json({
+      ok: false,
+      success: false,
+      message: `Failed to process OTP verification: ${err.message}`
+    });
+  }
 });
 
 /**

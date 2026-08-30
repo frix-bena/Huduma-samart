@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node server/test/scraper.test.js",
+    "test": "node server/test/scraper.test.js && node server/test/otp.test.js",
     "server": "cd server && npm start"
   },
   "dependencies": {

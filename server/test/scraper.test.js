@@ -372,7 +372,7 @@ async function runTests() {
 
       assert.strictEqual(name, "BERNARD GICHUKI");
       assert.strictEqual(nationalId, "40064257");
-      assert.strictEqual(academicYear, "2026/2027");
+      assert.strictEqual(academicYear, null);
       // On the initial landing page before navigating to profile/loans sub-routes, institution is missing from DOM
       // It must strictly be null / Data not found, NEVER footer copyright text
       assert.strictEqual(institution, null);

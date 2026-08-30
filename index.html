@@ -223,33 +223,53 @@
   <div class="modal-backdrop" id="loginModal" style="display:none;">
     <div class="modal-card">
       <div class="modal-head">
-        <div class="modal-title">🔐 Sign In to HEF Portal (portal.hef.co.ke)</div>
+        <div class="modal-title" id="loginModalTitle">🔐 Sign In to HEF Portal (portal.hef.co.ke)</div>
         <button class="icon-btn" onclick="closeLoginModal()" title="Close">✕</button>
       </div>
       <div class="modal-body">
-        <p class="modal-desc">
-          Sign in using your registered email and password on <strong>portal.hef.co.ke</strong> to retrieve your official HELB loan balances, band breakdowns, upkeep disbursements, and statements.
-        </p>
-        <form id="loginForm" onsubmit="handleLoginSubmit(event)">
-          <div class="form-group" style="margin-bottom:12px;">
-            <label for="loginCredential">Email Address or National ID</label>
-            <input type="text" id="loginCredential" placeholder="e.g. student@example.com or 12345678" required autocomplete="username" oninput="handleCredentialChange(this.value)">
-          </div>
-          <div class="form-group" style="margin-bottom:14px;">
-            <label for="loginPassword">Password</label>
-            <div class="password-input-wrap">
-              <input type="password" id="loginPassword" placeholder="Enter your portal password" required autocomplete="current-password" oninput="handlePasswordChange(this.value)">
-              <button type="button" class="pwd-toggle-btn" onclick="togglePasswordVisibility('loginPassword', this)" title="Show/Hide Password">👁️</button>
+        <div id="loginModalCredentialsStep">
+          <p class="modal-desc" id="loginModalDesc">
+            Sign in using your registered email and password on <strong>portal.hef.co.ke</strong> to retrieve your official HELB loan balances, band breakdowns, upkeep disbursements, and statements.
+          </p>
+          <form id="loginForm" onsubmit="handleLoginSubmit(event)">
+            <div class="form-group" style="margin-bottom:12px;">
+              <label for="loginCredential">Email Address or National ID</label>
+              <input type="text" id="loginCredential" placeholder="e.g. student@example.com or 12345678" required autocomplete="username" oninput="handleCredentialChange(this.value)">
             </div>
-          </div>
+            <div class="form-group" style="margin-bottom:14px;">
+              <label for="loginPassword">Password</label>
+              <div class="password-input-wrap">
+                <input type="password" id="loginPassword" placeholder="Enter your portal password" required autocomplete="current-password" oninput="handlePasswordChange(this.value)">
+                <button type="button" class="pwd-toggle-btn" onclick="togglePasswordVisibility('loginPassword', this)" title="Show/Hide Password">👁️</button>
+              </div>
+            </div>
 
-          <div class="modal-foot" style="margin-top:16px;padding:0;border:none;">
-            <button type="button" class="auth-btn-cancel" onclick="closeLoginModal()">Cancel</button>
-            <button type="submit" class="auth-btn" id="loginSubmitBtn">
-              <span>🔑</span> Connect &amp; Retrieve Records
-            </button>
-          </div>
-        </form>
+            <div class="modal-foot" style="margin-top:16px;padding:0;border:none;">
+              <button type="button" class="auth-btn-cancel" onclick="closeLoginModal()">Cancel</button>
+              <button type="submit" class="auth-btn" id="loginSubmitBtn">
+                <span>🔑</span> Connect &amp; Retrieve Records
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div id="loginModalOtpStep" style="display:none;">
+          <p class="modal-desc" id="modalOtpDesc">
+            The HEF portal requires Two-Factor Authentication. Please enter the OTP sent to your registered phone number or email address.
+          </p>
+          <form id="modalOtpForm" onsubmit="handleModalOtpSubmit(event)">
+            <div class="form-group" style="margin-bottom:14px;">
+              <label for="modalOtpInput">One-Time Password (OTP)</label>
+              <input type="text" id="modalOtpInput" placeholder="Enter OTP code" required autocomplete="one-time-code" style="width:100%;padding:10px 12px;background:var(--bg4);border:1px solid var(--border2);border-radius:8px;color:var(--t1);text-align:center;letter-spacing:3px;font-family:'JetBrains Mono',monospace;font-size:16px;outline:none;">
+            </div>
+            <div class="modal-foot" style="margin-top:16px;padding:0;border:none;display:flex;gap:8px;">
+              <button type="button" class="auth-btn-cancel" onclick="cancelModalOtp()" style="flex:1;">Back</button>
+              <button type="submit" class="auth-btn" id="modalOtpSubmitBtn" style="flex:2;">
+                <span>✓</span> Verify OTP
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   </div>

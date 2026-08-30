@@ -568,8 +568,44 @@ function handlePasswordChange(val) {
   if (inlinePassEl && inlinePassEl.value !== val) inlinePassEl.value = val;
 }
 
+let currentOtpSessionId = null;
+
+function resetLoginModalSteps() {
+  const credStep = document.getElementById("loginModalCredentialsStep");
+  const otpStep = document.getElementById("loginModalOtpStep");
+  const title = document.getElementById("loginModalTitle");
+  if (credStep) credStep.style.display = "block";
+  if (otpStep) otpStep.style.display = "none";
+  if (title) title.innerHTML = "🔐 Sign In to HEF Portal (portal.hef.co.ke)";
+}
+
+function showOtpInModal(otpSessionId, message) {
+  currentOtpSessionId = otpSessionId;
+  const credStep = document.getElementById("loginModalCredentialsStep");
+  const otpStep = document.getElementById("loginModalOtpStep");
+  const title = document.getElementById("loginModalTitle");
+  const desc = document.getElementById("modalOtpDesc");
+  if (credStep) credStep.style.display = "none";
+  if (otpStep) otpStep.style.display = "block";
+  if (title) title.innerHTML = "📱 HEF Portal Two-Factor Verification";
+  if (desc && message) {
+    desc.innerHTML = `The HEF portal requires Two-Factor Authentication.<br><strong style="color:var(--accent);">${message}</strong>`;
+  }
+  if (loginModal) loginModal.style.display = "flex";
+  const otpInput = document.getElementById("modalOtpInput");
+  if (otpInput) {
+    otpInput.value = "";
+    setTimeout(() => otpInput.focus(), 100);
+  }
+}
+
+function cancelModalOtp() {
+  resetLoginModalSteps();
+}
+
 function openLoginModal() {
   if (loginModal) loginModal.style.display = "flex";
+  resetLoginModalSteps();
   const idInput = document.getElementById("loginCredential");
   if (idInput) {
     if (userEmailState) idInput.value = userEmailState;
@@ -581,6 +617,7 @@ function openLoginModal() {
 
 function closeLoginModal() {
   if (loginModal) loginModal.style.display = "none";
+  resetLoginModalSteps();
 }
 
 function togglePasswordVisibility(inputId, btn) {
@@ -620,8 +657,15 @@ async function handleLoginSubmit(e) {
   if (idEl?.value) userEmailState = idEl.value.trim();
   if (passEl?.value) userPasswordState = passEl.value;
   if (!userEmailState || !userPasswordState) return;
-  closeLoginModal();
   await performLogin(userEmailState, userPasswordState);
+}
+
+async function handleModalOtpSubmit(e) {
+  e.preventDefault();
+  const otpInput = document.getElementById("modalOtpInput");
+  const code = (otpInput?.value || "").trim();
+  if (!code || !currentOtpSessionId) return;
+  await submitOtp(code, currentOtpSessionId);
 }
 
 async function handleInlineLoginSubmit(e) {
@@ -632,6 +676,67 @@ async function handleInlineLoginSubmit(e) {
   if (passEl?.value) userPasswordState = passEl.value;
   if (!userEmailState || !userPasswordState) return;
   await performLogin(userEmailState, userPasswordState);
+}
+
+async function handleInlineOtpSubmit(e, otpSessionId) {
+  e.preventDefault();
+  const inputEl = document.getElementById("inlineOtpInput");
+  const code = (inputEl?.value || "").trim();
+  const sessionId = otpSessionId || currentOtpSessionId;
+  if (!code || !sessionId) return;
+  await submitOtp(code, sessionId);
+}
+
+function cancelOtpLogin() {
+  currentOtpSessionId = null;
+  addMsg("agent", "OTP verification was cancelled. Please sign in below when ready:");
+  renderAuthGateInFeed(userEmailState);
+}
+
+// ── Profile Applier ──
+function applyAuthenticatedProfile(res, isOtp = false) {
+  const p = res.profile;
+  S.auth = true;
+  S.sessionToken = res.sessionToken || `hef-sess-${Date.now().toString(36)}`;
+  S.nationalId = p.student?.nationalId || (/^\d{5,10}$/.test(userEmailState) ? userEmailState : S.nationalId || "");
+  S.name = p.student?.name || cleanNameFromEmail(userEmailState) || (S.nationalId ? `Student (${S.nationalId})` : "Student");
+  S.email = p.student?.email || (userEmailState.includes("@") ? userEmailState : S.email || "");
+  S.phone = p.student?.phone || S.phone || "";
+  S.kcseIndex = p.student?.kcseIndex || S.kcseIndex || "";
+  S.institution = p.student?.institution || S.institution || "";
+  S.programme = p.student?.programme || S.programme || "";
+  S.level = p.student?.level || S.level || "Undergraduate";
+  S.yearOfStudy = p.student?.yearOfStudy ? parseInt(p.student.yearOfStudy, 10) : S.yearOfStudy;
+  S.currentSemester = p.student?.currentSemester ? parseInt(p.student.currentSemester, 10) : S.currentSemester;
+  S.band = p.funding?.band || (p.funding?.bandName ? parseInt(p.funding.bandName.replace(/[^0-9]/g, ""), 10) : S.band);
+  S.bandName = p.funding?.bandName || (S.band ? `Band ${S.band}` : S.bandName || "");
+  S.academicYear = p.student?.academicYear || S.academicYear || "";
+  S.bankName = p.student?.bankName || S.bankName || "";
+  S.accountNumber = p.student?.accountNumber || S.accountNumber || "";
+  S.county = p.student?.county || S.county || "";
+  S.subCounty = p.student?.subCounty || S.subCounty || "";
+  S.constituency = p.student?.constituency || S.constituency || "";
+  S.dob = p.student?.dob || S.dob || "";
+  S.gender = p.student?.gender || S.gender || "";
+  S.registrationNumber = p.student?.registrationNumber || S.registrationNumber || "";
+  S.repaid = p.funding?.cumulative?.repaid !== undefined ? p.funding.cumulative.repaid : (S.repaid || 0);
+  S.penalty = p.funding?.cumulative?.penalty !== undefined ? p.funding.cumulative.penalty : (S.penalty || 0);
+  S.outstandingBalance = p.funding?.cumulative?.outstandingBalance !== undefined ? p.funding.cumulative.outstandingBalance : S.outstandingBalance;
+  S.loanAwarded = p.funding?.cumulative?.awardedPrincipal !== undefined ? p.funding.cumulative.awardedPrincipal : S.loanAwarded;
+  S.disbursements = Array.isArray(p.disbursements) ? p.disbursements : (Array.isArray(S.disbursements) ? S.disbursements : []);
+  S.dataIntegrityWarning = !!(res.dataIntegrityWarning || p.dataIntegrityWarning);
+  S.warningDetail = res.warningDetail || p.warningDetail || null;
+
+  saveSessionState();
+  updateSessionUI();
+
+  const calculated = calculateCurrentProfile();
+  const dashboardCard = cardHefPortalDashboard(calculated);
+  const authMsg = isOtp
+    ? `✅ <strong>Authenticated with HEF Portal (portal.hef.co.ke) via OTP Verification</strong><br><br>Here are your official student financing records for <strong>${S.name || S.email}</strong> exactly as recorded on the portal:<br><br>${dashboardCard}`
+    : `✅ <strong>Authenticated with HEF Portal (portal.hef.co.ke)</strong><br><br>Here are your official student financing records for <strong>${S.name || S.email}</strong> exactly as recorded on the portal:<br><br>${dashboardCard}`;
+
+  addMsg("agent", authMsg);
 }
 
 // ── Core Login Processor ──
@@ -653,8 +758,18 @@ async function performLogin(email, password) {
     tc.classList.add("tool-done");
     hideTyping();
 
+    // Check if OTP challenge was received
+    if (res && res.requiresOtp) {
+      currentOtpSessionId = res.otpSessionId;
+      addMsg("agent", `📱 <strong>Two-Factor Authentication (OTP) Required</strong><br><br>The portal at <code>portal.hef.co.ke</code> challenged this login with an OTP verification step.<br><blockquote style="margin:8px 0;padding:8px 12px;background:rgba(59,130,246,0.12);border-left:3px solid var(--accent);border-radius:4px;color:#93c5fd;font-size:13px;">${res.message || "Enter the OTP sent to your phone/email."}</blockquote>Please enter the code below to complete authentication:`);
+      renderOtpGateInFeed(res.otpSessionId);
+      showOtpInModal(res.otpSessionId, res.message);
+      return;
+    }
+
     // Check for network error or service offline
     if (res && (res.network_error || res.status === 503 || (res.ok === false && res.message && (res.message.includes("offline") || res.message.includes("unreachable") || res.message.includes("timed out") || res.message.includes("connect"))))) {
+      closeLoginModal();
       S.auth = false;
       updateSessionUI();
       addMsg("agent", `⚠️ <strong>HEF Portal Connection Issue</strong><br><br>${res.message || "Unable to reach portal.hef.co.ke at this moment. The portal may be temporarily offline or experiencing high traffic."}<br><br>Please check your connection and try logging in again below:`);
@@ -664,6 +779,7 @@ async function performLogin(email, password) {
 
     // Check for explicit portal authentication rejection (wrong password, user not found, deactivated)
     if (res && res.ok === false) {
+      closeLoginModal();
       S.auth = false;
       updateSessionUI();
       addMsg("agent", `⚠️ <strong>HEF Portal Authentication Failed</strong><br><br>The portal at <code>portal.hef.co.ke</code> reported:<br><blockquote style="margin:8px 0;padding:8px 12px;background:rgba(239,68,68,0.12);border-left:3px solid var(--red);border-radius:4px;color:#fca5a5;font-size:13px;">${res.message || "Invalid credentials. Please verify your Email/National ID and Password."}</blockquote>Please verify your details and try again below:`);
@@ -672,46 +788,11 @@ async function performLogin(email, password) {
     }
 
     if (res && res.ok && res.profile) {
-      const p = res.profile;
-      S.auth = true;
-      S.sessionToken = res.sessionToken || `hef-sess-${Date.now().toString(36)}`;
-      S.nationalId = p.student?.nationalId || (/^\d{5,10}$/.test(userEmailState) ? userEmailState : S.nationalId || "");
-      S.name = p.student?.name || cleanNameFromEmail(userEmailState) || (S.nationalId ? `Student (${S.nationalId})` : "Student");
-      S.email = p.student?.email || (userEmailState.includes("@") ? userEmailState : S.email || "");
-      S.phone = p.student?.phone || S.phone || "";
-      S.kcseIndex = p.student?.kcseIndex || S.kcseIndex || "";
-      S.institution = p.student?.institution || S.institution || "";
-      S.programme = p.student?.programme || S.programme || "";
-      S.level = p.student?.level || S.level || "Undergraduate";
-      S.yearOfStudy = p.student?.yearOfStudy ? parseInt(p.student.yearOfStudy, 10) : S.yearOfStudy;
-      S.currentSemester = p.student?.currentSemester ? parseInt(p.student.currentSemester, 10) : S.currentSemester;
-      S.band = p.funding?.band || (p.funding?.bandName ? parseInt(p.funding.bandName.replace(/[^0-9]/g, ""), 10) : S.band);
-      S.bandName = p.funding?.bandName || (S.band ? `Band ${S.band}` : S.bandName || "");
-      S.academicYear = p.student?.academicYear || S.academicYear || "";
-      S.bankName = p.student?.bankName || S.bankName || "";
-      S.accountNumber = p.student?.accountNumber || S.accountNumber || "";
-      S.county = p.student?.county || S.county || "";
-      S.subCounty = p.student?.subCounty || S.subCounty || "";
-      S.constituency = p.student?.constituency || S.constituency || "";
-      S.dob = p.student?.dob || S.dob || "";
-      S.gender = p.student?.gender || S.gender || "";
-      S.registrationNumber = p.student?.registrationNumber || S.registrationNumber || "";
-      S.repaid = p.funding?.cumulative?.repaid !== undefined ? p.funding.cumulative.repaid : (S.repaid || 0);
-      S.penalty = p.funding?.cumulative?.penalty !== undefined ? p.funding.cumulative.penalty : (S.penalty || 0);
-      S.outstandingBalance = p.funding?.cumulative?.outstandingBalance !== undefined ? p.funding.cumulative.outstandingBalance : S.outstandingBalance;
-      S.loanAwarded = p.funding?.cumulative?.awardedPrincipal !== undefined ? p.funding.cumulative.awardedPrincipal : S.loanAwarded;
-      S.disbursements = Array.isArray(p.disbursements) ? p.disbursements : (Array.isArray(S.disbursements) ? S.disbursements : []);
-      S.dataIntegrityWarning = !!(res.dataIntegrityWarning || p.dataIntegrityWarning);
-      S.warningDetail = res.warningDetail || p.warningDetail || null;
-
-      saveSessionState();
-      updateSessionUI();
-
-      const calculated = calculateCurrentProfile();
-      const dashboardCard = cardHefPortalDashboard(calculated);
-
-      addMsg("agent", `✅ <strong>Authenticated with HEF Portal (portal.hef.co.ke)</strong><br><br>Here are your official student financing records for <strong>${S.name || S.email}</strong> exactly as recorded on the portal:<br><br>${dashboardCard}`);
+      closeLoginModal();
+      currentOtpSessionId = null;
+      applyAuthenticatedProfile(res, false);
     } else {
+      closeLoginModal();
       S.auth = false;
       updateSessionUI();
       addMsg("agent", `⚠️ <strong>HEF Portal Authentication Failed</strong><br><br>Could not establish an authenticated session with <code>portal.hef.co.ke</code>. Please check your credentials and try again below:`);
@@ -719,10 +800,59 @@ async function performLogin(email, password) {
     }
   } catch (err) {
     hideTyping();
+    closeLoginModal();
     console.error("[performLogin] Error:", err);
     S.auth = false;
     updateSessionUI();
     addMsg("agent", `⚠️ <strong>Connection Error</strong><br><br>An error occurred while connecting to the HEF portal service (${err.message}). Please ensure your network connection is active and try again below:`);
+    renderAuthGateInFeed(userEmailState);
+  }
+}
+
+// ── Core OTP Processor ──
+async function submitOtp(otpCode, otpSessionId) {
+  const code = (otpCode || "").trim();
+  const sessionId = (otpSessionId || currentOtpSessionId || "").trim();
+
+  if (!code) return;
+
+  const g = ++GEN;
+  showTyping(`Submitting OTP verification code to portal.hef.co.ke…`);
+  const tc = renderToolCard("hef_portal_verify_otp", { portalUrl: "https://portal.hef.co.ke/auth/verify_otp", otpSessionId: sessionId });
+
+  try {
+    const res = await apiCall(API.otp, {
+      otp: code,
+      otpSessionId: sessionId,
+      sessionToken: sessionId,
+      credential: userEmailState,
+      email: userEmailState
+    });
+
+    await rawWait(450);
+    tc.classList.add("tool-done");
+    hideTyping();
+
+    if (res && res.ok && res.profile) {
+      closeLoginModal();
+      currentOtpSessionId = null;
+      applyAuthenticatedProfile(res, true);
+    } else {
+      currentOtpSessionId = null;
+      closeLoginModal();
+      S.auth = false;
+      updateSessionUI();
+      addMsg("agent", `⚠️ <strong>OTP Verification Failed</strong><br><br>The portal at <code>portal.hef.co.ke</code> reported:<br><blockquote style="margin:8px 0;padding:8px 12px;background:rgba(239,68,68,0.12);border-left:3px solid var(--red);border-radius:4px;color:#fca5a5;font-size:13px;">${res.message || "Invalid or expired OTP code."}</blockquote>Please verify your details and try again below:`);
+      renderAuthGateInFeed(userEmailState);
+    }
+  } catch (err) {
+    hideTyping();
+    currentOtpSessionId = null;
+    closeLoginModal();
+    console.error("[submitOtp] Error:", err);
+    S.auth = false;
+    updateSessionUI();
+    addMsg("agent", `⚠️ <strong>Connection Error</strong><br><br>An error occurred while verifying your OTP with the portal (${err.message}). Please try logging in again below:`);
     renderAuthGateInFeed(userEmailState);
   }
 }
@@ -757,6 +887,7 @@ function logout() {
   S.disbursements = [];
   userEmailState = "";
   userPasswordState = "";
+  currentOtpSessionId = null;
 
   localStorage.removeItem(STORAGE_KEY);
   updateSessionUI();
@@ -796,6 +927,39 @@ function renderAuthGateCard(prefillEmail = "") {
         </div>
       </form>
     </div>`;
+}
+
+// ── In-Feed OTP Gate Card ──
+function renderOtpGateCard(otpSessionId) {
+  return `
+    <div class="auth-gate-card">
+      <div class="auth-gate-header">
+        <div class="auth-gate-icon">📱</div>
+        <div>
+          <div class="auth-gate-title">Enter HEF Portal OTP Verification Code</div>
+          <div class="auth-gate-sub">Enter the code sent to your registered phone number / email address on portal.hef.co.ke</div>
+        </div>
+      </div>
+      <form onsubmit="handleInlineOtpSubmit(event, '${otpSessionId}')">
+        <div class="form-group" style="margin-bottom:12px;">
+          <label style="font-size:11px;font-weight:600;color:var(--t3);text-transform:uppercase;">One-Time Password (OTP)</label>
+          <input type="text" id="inlineOtpInput" placeholder="Enter OTP code" required autocomplete="one-time-code" style="width:100%;padding:10px 12px;background:var(--bg4);border:1px solid var(--border2);border-radius:8px;color:var(--t1);font-size:15px;letter-spacing:3px;font-family:'JetBrains Mono',monospace;text-align:center;outline:none;">
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button type="button" class="auth-btn-cancel" onclick="cancelOtpLogin()" style="flex:1;padding:10px;font-size:13px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--t2);cursor:pointer;">Cancel</button>
+          <button type="submit" class="auth-btn" id="inlineOtpSubmitBtn" style="flex:2;padding:10px;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <span>✓</span> Verify OTP &amp; Retrieve Records
+          </button>
+        </div>
+        <div style="font-size:11px;color:var(--t3);text-align:center;margin-top:8px;">
+          🔒 Your OTP is submitted directly to the active HEF portal browser session.
+        </div>
+      </form>
+    </div>`;
+}
+
+function renderOtpGateInFeed(otpSessionId) {
+  addMsg("agent", renderOtpGateCard(otpSessionId));
 }
 
 function renderAuthGateInFeed(prefillEmail = "") {

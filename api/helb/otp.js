@@ -2,25 +2,20 @@
  * Huduma Smart — /api/helb/otp
  * Vercel Serverless Function
  *
- * OTP submission placeholder.
- * Full implementation requires persistent browser sessions (store context
- * state between requests — use Vercel KV or a Redis store in production).
+ * OTP submission endpoint for Vercel serverless deployment.
+ * Serverless functions cannot maintain persistent Playwright browser instances
+ * across stateless HTTP requests.
  */
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
   if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "POST") return res.status(405).json({ ok: false, success: false, message: "Method not allowed." });
 
-  const { otp, sessionToken } = req.body || {};
-  if (!otp || !sessionToken) {
-    return res.status(400).json({ ok: false, message: "otp and sessionToken are required." });
-  }
-
-  // TODO: Resume saved browser context and submit OTP
-  // For now, return a graceful message
   return res.status(200).json({
     ok: false,
-    message: "OTP submission requires a persistent session. Please log in again from the HELB portal directly if OTP is triggered.",
+    success: false,
+    message: "OTP is not supported on this deployment, please complete login at portal.hef.co.ke directly."
   });
 };
