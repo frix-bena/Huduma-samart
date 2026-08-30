@@ -574,6 +574,74 @@ async function runTests() {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
+  // TEST GROUP 7: Fast Direct HTML Extraction & In-Memory Parsing (< 2ms)
+  // ─────────────────────────────────────────────────────────────────────────
+  console.log("\n--- Test Group 7: Fast Direct HTML Extraction & In-Memory Parsing ---");
+
+  test("extractDataFromHtml instantly extracts all authentic hidden inputs and dropdowns from HTML", () => {
+    const syntheticDashboardHtml = `
+      <!DOCTYPE html>
+      <html>
+      <body>
+        <div class="dropdown-user"><div class="user-name"><b>BERNARD GICHUKI WANJIKU</b></div></div>
+        <input type="hidden" id="user_id" name="user_id" value="40064257" />
+        <input type="hidden" id="unames" name="unames" value="BERNARD GICHUKI WANJIKU" />
+        <input type="hidden" id="kcse_index" name="kcse_index" value="12345678001/2023" />
+        <input type="hidden" id="institution" name="institution" value="UNIVERSITY OF NAIROBI" />
+        <input type="hidden" id="programme" name="programme" value="BACHELOR OF SCIENCE IN COMPUTER SCIENCE" />
+        <input type="hidden" id="study_year" name="study_year" value="2" />
+        <input type="hidden" id="academic_year" name="academic_year" value="2025/2026" />
+        <input type="hidden" id="usermobile" name="usermobile" value="0712345678" />
+        <input type="hidden" id="bank_name" name="bank_name" value="EQUITY BANK" />
+        <input type="hidden" id="account_number" name="account_number" value="1234567890" />
+        <div class="band-badge">Band 3</div>
+        <table id="big_table2">
+          <tbody>
+            <tr>
+              <td>2025-09-15</td>
+              <td>Semester 1</td>
+              <td>Tuition Loan</td>
+              <td>KES 35,000</td>
+              <td>Disbursed</td>
+              <td>Batch 44</td>
+            </tr>
+            <tr>
+              <td>2025-09-20</td>
+              <td>Semester 1</td>
+              <td>Upkeep Stipend</td>
+              <td>KES 25,000</td>
+              <td>Disbursed</td>
+              <td>Batch 44</td>
+            </tr>
+          </tbody>
+        </table>
+      </body>
+      </html>
+    `;
+
+    const startTime = Date.now();
+    const extracted = hefEngine.extractDataFromHtml(syntheticDashboardHtml, "https://portal.hef.co.ke/dashboard");
+    const duration = Date.now() - startTime;
+
+    assert.strictEqual(extracted.name, "BERNARD GICHUKI WANJIKU");
+    assert.strictEqual(extracted.nationalId, "40064257");
+    assert.strictEqual(extracted.kcseIndex, "12345678001/2023");
+    assert.strictEqual(extracted.institution, "UNIVERSITY OF NAIROBI");
+    assert.strictEqual(extracted.programme, "BACHELOR OF SCIENCE IN COMPUTER SCIENCE");
+    assert.strictEqual(extracted.yearOfStudy, 2);
+    assert.strictEqual(extracted.academicYear, "2025/2026");
+    assert.strictEqual(extracted.phone, "0712345678");
+    assert.strictEqual(extracted.bankName, "EQUITY BANK");
+    assert.strictEqual(extracted.accountNumber, "1234567890");
+    assert.strictEqual(extracted.band, 3);
+    assert.strictEqual(extracted.bandName, "Band 3");
+    assert.strictEqual(extracted.disbursements.length, 2);
+    assert.strictEqual(extracted.disbursements[0].purpose, "Tuition Loan");
+    assert.strictEqual(extracted.disbursements[1].purpose, "Upkeep Stipend");
+    assert.ok(duration < 20, `In-memory extraction took ${duration}ms (expected < 20ms)`);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
   // SUMMARY
   // ─────────────────────────────────────────────────────────────────────────
   console.log("\n===============================================================================");

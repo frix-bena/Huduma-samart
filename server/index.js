@@ -254,7 +254,7 @@ async function scrapeFieldByLabels(page, fieldName, labels, fallbackSelectors = 
     // 1. Exact Playwright locator with following-sibling: text="Label" >> xpath=following-sibling::*[1]
     try {
       const sibLoc = page.locator(`text="${label}" >> xpath=following-sibling::*[1]`).first();
-      if (await sibLoc.isVisible({ timeout: 400 }).catch(() => false)) {
+      if (await sibLoc.isVisible({ timeout: 150 }).catch(() => false)) {
         const raw = await sibLoc.innerText().catch(async () => await sibLoc.textContent().catch(() => ""));
         const clean = sanitizeText(raw);
         if (clean && clean.toLowerCase() !== lower) {
@@ -273,7 +273,7 @@ async function scrapeFieldByLabels(page, fieldName, labels, fallbackSelectors = 
     // 2. Case-insensitive following-sibling xpath
     try {
       const xpathLoc = page.locator(`xpath=//*[translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')="${lower}" or contains(translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]/following-sibling::*[1]`).first();
-      if (await xpathLoc.isVisible({ timeout: 400 }).catch(() => false)) {
+      if (await xpathLoc.isVisible({ timeout: 150 }).catch(() => false)) {
         const raw = await xpathLoc.innerText().catch(async () => await xpathLoc.textContent().catch(() => ""));
         const clean = sanitizeText(raw);
         if (clean && clean.toLowerCase() !== lower) {
@@ -292,7 +292,7 @@ async function scrapeFieldByLabels(page, fieldName, labels, fallbackSelectors = 
     // 3. Table cell: <td>Label</td><td>Value</td> or <th>Label</th><td>Value</td>
     try {
       const tableCellLoc = page.locator(`xpath=//td[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]/following-sibling::td[1] | //th[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]/following-sibling::td[1]`).first();
-      if (await tableCellLoc.isVisible({ timeout: 400 }).catch(() => false)) {
+      if (await tableCellLoc.isVisible({ timeout: 150 }).catch(() => false)) {
         const raw = await tableCellLoc.innerText().catch(async () => await tableCellLoc.textContent().catch(() => ""));
         const clean = sanitizeText(raw);
         if (clean && clean.toLowerCase() !== lower) {
@@ -311,7 +311,7 @@ async function scrapeFieldByLabels(page, fieldName, labels, fallbackSelectors = 
     // 4. Definition list: <dt>Label</dt><dd>Value</dd>
     try {
       const ddLoc = page.locator(`xpath=//dt[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")]/following-sibling::dd[1]`).first();
-      if (await ddLoc.isVisible({ timeout: 400 }).catch(() => false)) {
+      if (await ddLoc.isVisible({ timeout: 150 }).catch(() => false)) {
         const raw = await ddLoc.innerText().catch(async () => await ddLoc.textContent().catch(() => ""));
         const clean = sanitizeText(raw);
         if (clean && clean.toLowerCase() !== lower) {
@@ -330,7 +330,7 @@ async function scrapeFieldByLabels(page, fieldName, labels, fallbackSelectors = 
     // 5. Strictly scoped container (max 3 ancestors above label, NO row/col page-wide containers)
     try {
       const containerLoc = page.locator(`xpath=(//*[translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')="${lower}" or contains(translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}")][not(self::body or self::html or self::footer or contains(@class, "footer"))]/ancestor::*[position() <= 3 and (contains(@class, "form-group") or contains(@class, "detail") or contains(@class, "item") or contains(@class, "info-box") or contains(@class, "data-field") or contains(@class, "profile-field") or contains(@class, "field"))]//*[contains(@class, "value") or contains(@class, "desc") or contains(@class, "text") or contains(@class, "number") or self::b or self::strong or self::span][not(contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${lower}"))])[1]`).first();
-      if (await containerLoc.isVisible({ timeout: 400 }).catch(() => false)) {
+      if (await containerLoc.isVisible({ timeout: 150 }).catch(() => false)) {
         const raw = await containerLoc.innerText().catch(async () => await containerLoc.textContent().catch(() => ""));
         const clean = sanitizeText(raw);
         if (clean && clean.toLowerCase() !== lower) {
@@ -351,7 +351,7 @@ async function scrapeFieldByLabels(page, fieldName, labels, fallbackSelectors = 
   for (const sel of fallbackSelectors) {
     try {
       const loc = page.locator(sel).first();
-      if (await loc.isVisible({ timeout: 400 }).catch(() => false) || (sel.includes("input") && await loc.count().catch(() => 0) > 0)) {
+      if (await loc.isVisible({ timeout: 150 }).catch(() => false) || (sel.includes("input") && await loc.count().catch(() => 0) > 0)) {
         let raw = "";
         if (sel.includes("input") || await loc.evaluate(el => el.tagName === "INPUT").catch(() => false)) {
           raw = await loc.inputValue().catch(async () => await loc.getAttribute("value").catch(() => ""));
@@ -385,66 +385,60 @@ async function scrapeFieldByLabels(page, fieldName, labels, fallbackSelectors = 
 
 /**
  * Strict DOM Scraping of HEF Portal Dashboard.
- * Extracts raw text from HTML nodes using Playwright locators without any mock JSON or LLM parsing.
+ * Extracts raw text from HTML nodes and input fields rapidly.
  */
 async function scrapeDashboardFromPage(page) {
-  console.log("[playwright-scraper] Waiting for HEF dashboard dynamic data to render…");
+  console.log("[playwright-scraper] ⚡ Fast scraping HEF dashboard data…");
 
-  // 1. WAIT FOR DYNAMIC DATA TO RENDER
-  await page.waitForLoadState('networkidle').catch(() => {});
-  await page.waitForTimeout(3000); // Give React/Angular an extra 3 seconds to render the DOM
+  // Fast wait for DOM to mount
+  await page.waitForSelector('.dashboard-container, .profile-details, .content-wrapper, .content, .main-content, .card, .card-body, .box, .box-body, #dashboard, .profile, .student-info, .user-panel, .dropdown-user, input#user_id', { timeout: 3000 }).catch(() => {});
+  await page.waitForLoadState("domcontentloaded", { timeout: 3000 }).catch(() => {});
 
-  // 2. TAKE A DASHBOARD SCREENSHOT & DUMP HTML (Debug Mode Only)
   if (process.env.DEBUG_VISIBLE === "true") {
     const ts = Date.now();
     const screenshotPath = path.join(SCREENSHOTS_DIR, `debug-dashboard-fully-loaded-${ts}.png`);
     const htmlPath = path.join(SCREENSHOTS_DIR, `debug-dashboard-${ts}.html`);
-
     try {
       await page.screenshot({ path: screenshotPath, fullPage: true });
-      console.log(`[playwright-scraper] Saved screenshot to ${screenshotPath}`);
-    } catch (err) {
-      console.warn("[playwright-scraper] Screenshot failed:", err.message);
-    }
-
-    try {
       const html = await page.content();
       fs.writeFileSync(htmlPath, html);
-      console.log(`[playwright-scraper] Saved dashboard HTML to ${htmlPath}`);
-    } catch (err) {
-      console.warn("[playwright-scraper] HTML dump failed:", err.message);
-    }
+    } catch (_) {}
   }
-
-  // Wait for HEF dashboard data container / profile details to mount
-  await page.waitForSelector('.dashboard-container, .profile-details, .content-wrapper, .content, .main-content, .card, .card-body, .box, .box-body, #dashboard, .profile, .student-info, .user-panel', { timeout: 10000 }).catch(() => {});
-  await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
 
   const extractionAudit = {};
 
-  // 1. Student Full Name (Verified from authenticated debug-dashboard.html navbar and hidden fields)
-  let name = await scrapeFieldByLabels(page, "name",
-    ["Full Name", "Student Name", "Loanee Name", "Applicant Name", "Name"],
-    [
-      ".dropdown-user .user-name b",
-      ".dropdown-user .user-name",
-      "input#unames",
-      "input#names",
-      ".user-name.text-bold-700",
-      ".profile-username",
-      ".student-name",
-      ".profile-name",
-      "#student_name",
-      ".user-panel .info",
-      ".nav-user-name",
-      "header .dropdown-toggle",
-      ".navbar-nav .dropdown-toggle",
-      ".navbar-custom-menu .dropdown-toggle",
-      "h3.profile-username",
-      ".widget-user-username"
-    ],
-    extractionAudit
-  );
+  // Extract directly from page HTML in memory (< 2ms)
+  const pageHtml = await page.content().catch(() => "");
+  const domExtracted = hefEngine.extractDataFromHtml ? hefEngine.extractDataFromHtml(pageHtml, page.url()) : {};
+
+  // 1. Student Full Name
+  let name = domExtracted.name;
+  if (name) {
+    extractionAudit.name = { status: "FOUND", strategy: "html-parser", matched: "html-input/user-name", value: name };
+  } else {
+    name = await scrapeFieldByLabels(page, "name",
+      ["Full Name", "Student Name", "Loanee Name", "Applicant Name", "Name"],
+      [
+        ".dropdown-user .user-name b",
+        ".dropdown-user .user-name",
+        "input#unames",
+        "input#names",
+        ".user-name.text-bold-700",
+        ".profile-username",
+        ".student-name",
+        ".profile-name",
+        "#student_name",
+        ".user-panel .info",
+        ".nav-user-name",
+        "header .dropdown-toggle",
+        ".navbar-nav .dropdown-toggle",
+        ".navbar-custom-menu .dropdown-toggle",
+        "h3.profile-username",
+        ".widget-user-username"
+      ],
+      extractionAudit
+    );
+  }
   if (name) {
     name = name.replace(/^welcome,?\s*/i, "").replace(/^(student|user|hi|hello):?\s*/i, "").trim();
     if (/dashboard|sign out|logout|profile|menu/i.test(name) || name.length < 2) {
@@ -453,262 +447,315 @@ async function scrapeDashboardFromPage(page) {
   }
 
   // 2. Institution / University
-  const institution = await scrapeFieldByLabels(page, "institution",
-    ["Institution", "University", "College", "Institution Name", "University / College", "Institution of Study", "School"],
-    ["input#institution", ".institution-name", "#institution", "#university", ".university-name", "#college", ".college-name"],
-    extractionAudit
-  );
+  let institution = domExtracted.institution;
+  if (institution) {
+    extractionAudit.institution = { status: "FOUND", strategy: "html-parser", matched: "html-institution", value: institution };
+  } else {
+    institution = await scrapeFieldByLabels(page, "institution",
+      ["Institution", "University", "College", "Institution Name", "University / College", "Institution of Study", "School"],
+      ["input#institution", ".institution-name", "#institution", "#university", ".university-name", "#college", ".college-name"],
+      extractionAudit
+    );
+  }
 
   // 3. Allocated Band
-  const allocatedBandRaw = await scrapeFieldByLabels(page, "bandAllocated",
-    ["Allocated Band", "Funding Band", "Band Allocated", "Current Band", "Assigned Band", "Band"],
-    [".band-allocated", "#allocated_band", ".hef-band", ".band-badge", ".badge-band", "#band"],
-    extractionAudit
-  );
-  let allocatedBand = allocatedBandRaw;
-  let bandNum = null;
-  if (allocatedBandRaw) {
-    const bMatch = allocatedBandRaw.match(/\b([1-5])\b/);
-    if (bMatch) {
-      bandNum = parseInt(bMatch[1], 10);
-      allocatedBand = `Band ${bMatch[1]}`;
+  let allocatedBand = domExtracted.bandName || (domExtracted.band ? `Band ${domExtracted.band}` : null);
+  let bandNum = domExtracted.bandNum || domExtracted.band || null;
+  if (allocatedBand) {
+    extractionAudit.bandAllocated = { status: "FOUND", strategy: "html-parser", matched: "html-band", value: allocatedBand };
+  } else {
+    const allocatedBandRaw = await scrapeFieldByLabels(page, "bandAllocated",
+      ["Allocated Band", "Funding Band", "Band Allocated", "Current Band", "Assigned Band", "Band"],
+      [".band-allocated", "#allocated_band", ".hef-band", ".band-badge", ".badge-band", "#band"],
+      extractionAudit
+    );
+    allocatedBand = allocatedBandRaw;
+    if (allocatedBandRaw) {
+      const bMatch = allocatedBandRaw.match(/\b([1-5])\b/);
+      if (bMatch) {
+        bandNum = parseInt(bMatch[1], 10);
+        allocatedBand = `Band ${bMatch[1]}`;
+      }
     }
   }
 
   // 4. Total Outstanding Due / Loan Balance
-  const outstandingDue = await scrapeFieldByLabels(page, "outstandingDue",
-    ["Total Outstanding", "Outstanding Due", "Loan Balance", "Outstanding Balance", "Current Balance", "Total Loan Due", "Total Due", "Total Outstanding Due"],
-    [".outstanding-balance", "#outstanding_balance", ".total-outstanding", "#total_outstanding", "#loan_balance", ".loan-balance"],
-    extractionAudit
-  );
+  let outstandingDue = domExtracted.outstandingDue;
+  if (outstandingDue) {
+    extractionAudit.outstandingDue = { status: "FOUND", strategy: "html-parser", matched: "html-outstanding", value: outstandingDue };
+  } else {
+    outstandingDue = await scrapeFieldByLabels(page, "outstandingDue",
+      ["Total Outstanding", "Outstanding Due", "Loan Balance", "Outstanding Balance", "Current Balance", "Total Loan Due", "Total Due", "Total Outstanding Due"],
+      [".outstanding-balance", "#outstanding_balance", ".total-outstanding", "#total_outstanding", "#loan_balance", ".loan-balance"],
+      extractionAudit
+    );
+  }
 
-  // 5. National ID (Verified from debug-dashboard.html hidden field input#user_id)
-  const nationalId = await scrapeFieldByLabels(page, "nationalId",
-    ["National ID", "ID Number", "National ID No", "ID No", "National ID Number", "ID/Passport"],
-    [
-      "input#user_id",
-      "input[name='user_id']",
-      "input#id_number",
-      "input#id_no",
-      ".national-id",
-      "#national_id",
-      "#id_number",
-      ".id-number",
-      "#id_no",
-      ".id-no"
-    ],
-    extractionAudit
-  );
+  // 5. National ID
+  let nationalId = domExtracted.nationalId;
+  if (nationalId) {
+    extractionAudit.nationalId = { status: "FOUND", strategy: "html-parser", matched: "html-user_id", value: nationalId };
+  } else {
+    nationalId = await scrapeFieldByLabels(page, "nationalId",
+      ["National ID", "ID Number", "National ID No", "ID No", "National ID Number", "ID/Passport"],
+      [
+        "input#user_id",
+        "input[name='user_id']",
+        "input#id_number",
+        "input#id_no",
+        ".national-id",
+        "#national_id",
+        "#id_number",
+        ".id-number",
+        "#id_no",
+        ".id-no"
+      ],
+      extractionAudit
+    );
+  }
 
   // 6. KCSE Index
-  const kcseIndex = await scrapeFieldByLabels(page, "kcseIndex",
-    ["KCSE Index", "Index Number", "KCSE Index No", "Index No", "KCSE Index Number", "KCSE No"],
-    [
-      "input#kcse_index",
-      "input#index_no",
-      ".kcse-index",
-      "#kcse_index",
-      "#index_no",
-      ".index-no",
-      "#kcse_no"
-    ],
-    extractionAudit
-  );
+  let kcseIndex = domExtracted.kcseIndex;
+  if (kcseIndex) {
+    extractionAudit.kcseIndex = { status: "FOUND", strategy: "html-parser", matched: "html-kcse_index", value: kcseIndex };
+  } else {
+    kcseIndex = await scrapeFieldByLabels(page, "kcseIndex",
+      ["KCSE Index", "Index Number", "KCSE Index No", "Index No", "KCSE Index Number", "KCSE No"],
+      [
+        "input#kcse_index",
+        "input#index_no",
+        ".kcse-index",
+        "#kcse_index",
+        "#index_no",
+        ".index-no",
+        "#kcse_no"
+      ],
+      extractionAudit
+    );
+  }
 
   // 7. Programme / Course
-  const programme = await scrapeFieldByLabels(page, "programme",
-    ["Programme", "Program", "Course", "Programme of Study", "Program of Study", "Course of Study", "Degree", "Academic Programme"],
-    [
-      "input#programme",
-      ".programme-name",
-      "#programme",
-      "#course",
-      ".course-name",
-      "#program",
-      ".program-name"
-    ],
-    extractionAudit
-  );
+  let programme = domExtracted.programme;
+  if (programme) {
+    extractionAudit.programme = { status: "FOUND", strategy: "html-parser", matched: "html-programme", value: programme };
+  } else {
+    programme = await scrapeFieldByLabels(page, "programme",
+      ["Programme", "Program", "Course", "Programme of Study", "Program of Study", "Course of Study", "Degree", "Academic Programme"],
+      [
+        "input#programme",
+        ".programme-name",
+        "#programme",
+        "#course",
+        ".course-name",
+        "#program",
+        ".program-name"
+      ],
+      extractionAudit
+    );
+  }
 
   // 8. Level of Study
-  const level = await scrapeFieldByLabels(page, "level",
-    ["Level", "Level of Study", "Study Level", "Programme Level", "Education Level"],
-    [".study-level", "#study_level", ".level-of-study"],
-    extractionAudit
-  );
+  let level = domExtracted.level;
+  if (level) {
+    extractionAudit.level = { status: "FOUND", strategy: "html-parser", matched: "html-level", value: level };
+  } else {
+    level = await scrapeFieldByLabels(page, "level",
+      ["Level", "Level of Study", "Study Level", "Programme Level", "Education Level"],
+      [".study-level", "#study_level", ".level-of-study"],
+      extractionAudit
+    );
+  }
 
   // 9. Year of Study
-  const yearOfStudyRaw = await scrapeFieldByLabels(page, "yearOfStudy",
-    ["Year of Study", "Academic Year of Study", "Study Year", "Current Year", "Year"],
-    ["input#study_year", ".year-of-study", "#year_of_study", "#year"],
-    extractionAudit
-  );
-  let yearOfStudy = null;
-  if (yearOfStudyRaw) {
-    const yMatch = String(yearOfStudyRaw).match(/\b([1-6])\b/);
-    if (yMatch) yearOfStudy = parseInt(yMatch[1], 10);
+  let yearOfStudy = domExtracted.yearOfStudy || null;
+  if (yearOfStudy) {
+    extractionAudit.yearOfStudy = { status: "FOUND", strategy: "html-parser", matched: "html-year_of_study", value: yearOfStudy };
+  } else {
+    const yearOfStudyRaw = await scrapeFieldByLabels(page, "yearOfStudy",
+      ["Year of Study", "Academic Year of Study", "Study Year", "Current Year", "Year"],
+      ["input#study_year", ".year-of-study", "#year_of_study", "#year"],
+      extractionAudit
+    );
+    if (yearOfStudyRaw) {
+      const yMatch = String(yearOfStudyRaw).match(/\b([1-6])\b/);
+      if (yMatch) yearOfStudy = parseInt(yMatch[1], 10);
+    }
   }
 
   // 10. Semester
-  const currentSemesterRaw = await scrapeFieldByLabels(page, "currentSemester",
-    ["Semester", "Current Semester", "Study Semester"],
-    [".current-semester", "#current_semester", "#semester"],
-    extractionAudit
-  );
-  let currentSemester = null;
-  if (currentSemesterRaw) {
-    const sMatch = String(currentSemesterRaw).match(/\b([1-3])\b/);
-    if (sMatch) currentSemester = parseInt(sMatch[1], 10);
+  let currentSemester = domExtracted.currentSemester || null;
+  if (currentSemester) {
+    extractionAudit.currentSemester = { status: "FOUND", strategy: "html-parser", matched: "html-current_semester", value: currentSemester };
+  } else {
+    const currentSemesterRaw = await scrapeFieldByLabels(page, "currentSemester",
+      ["Semester", "Current Semester", "Study Semester"],
+      [".current-semester", "#current_semester", "#semester"],
+      extractionAudit
+    );
+    if (currentSemesterRaw) {
+      const sMatch = String(currentSemesterRaw).match(/\b([1-3])\b/);
+      if (sMatch) currentSemester = parseInt(sMatch[1], 10);
+    }
   }
 
-  // 11. Academic Year (Verified from debug-dashboard.html input#academic_year)
-  const academicYear = await scrapeFieldByLabels(page, "academicYear",
-    ["Academic Year", "Current Academic Year", "Financial Year"],
-    [
-      "input#academic_year",
-      "input[name='academic_year']",
-      ".academic-year",
-      "#academic_year"
-    ],
-    extractionAudit
-  );
+  // 11. Academic Year
+  let academicYear = domExtracted.academicYear;
+  if (academicYear) {
+    extractionAudit.academicYear = { status: "FOUND", strategy: "html-parser", matched: "html-academic_year", value: academicYear };
+  } else {
+    academicYear = await scrapeFieldByLabels(page, "academicYear",
+      ["Academic Year", "Current Academic Year", "Financial Year"],
+      [
+        "input#academic_year",
+        "input[name='academic_year']",
+        ".academic-year",
+        "#academic_year"
+      ],
+      extractionAudit
+    );
+  }
 
   // 12. Awarded Principal / Total Loan
-  const loanAwarded = await scrapeFieldByLabels(page, "loanAwarded",
+  const loanAwarded = domExtracted.loanAwarded || await scrapeFieldByLabels(page, "loanAwarded",
     ["Awarded Principal", "Total Loan", "Total Loan Awarded", "Loan Awarded", "Allocated Loan", "Total Awarded"],
     [".loan-awarded", "#loan_awarded", ".allocated-loan", "#allocated_loan"],
     extractionAudit
   );
 
   // 13. Scholarship Amount
-  const scholarshipAmount = await scrapeFieldByLabels(page, "scholarshipAmount",
+  const scholarshipAmount = domExtracted.scholarshipAmount || await scrapeFieldByLabels(page, "scholarshipAmount",
     ["Scholarship", "Scholarship Awarded", "Total Scholarship", "Allocated Scholarship", "Government Scholarship"],
     [".scholarship-amount", "#scholarship_amount", ".allocated-scholarship"],
     extractionAudit
   );
 
   // 14. Tuition Loan
-  const tuitionLoan = await scrapeFieldByLabels(page, "tuitionLoan",
+  const tuitionLoan = domExtracted.tuitionLoan || await scrapeFieldByLabels(page, "tuitionLoan",
     ["Tuition Loan", "Tuition", "Allocated Tuition Loan", "Tuition Portion"],
     [".tuition-loan", "#tuition_loan"],
     extractionAudit
   );
 
   // 15. Upkeep Loan
-  const upkeepLoan = await scrapeFieldByLabels(page, "upkeepLoan",
+  const upkeepLoan = domExtracted.upkeepLoan || await scrapeFieldByLabels(page, "upkeepLoan",
     ["Upkeep Loan", "Upkeep", "Allocated Upkeep", "Living Allowance", "Upkeep Stipend"],
     [".upkeep-loan", "#upkeep_loan", ".upkeep-amount", "#upkeep_amount"],
     extractionAudit
   );
 
   // 16. Household Fee
-  const householdFee = await scrapeFieldByLabels(page, "householdFee",
+  const householdFee = domExtracted.householdFee || await scrapeFieldByLabels(page, "householdFee",
     ["Household Contribution", "Household Fee", "Family Contribution", "Household Portion", "Direct Fee"],
     [".household-fee", "#household_fee", ".household-contribution"],
     extractionAudit
   );
 
   // 17. Total Repaid
-  const totalRepaid = await scrapeFieldByLabels(page, "totalRepaid",
+  const totalRepaid = domExtracted.totalRepaid !== undefined ? domExtracted.totalRepaid : await scrapeFieldByLabels(page, "totalRepaid",
     ["Total Repaid", "Amount Repaid", "Repaid", "Repayment to Date", "Total Payment"],
     [".total-repaid", "#total_repaid", ".amount-repaid"],
     extractionAudit
   );
 
   // 18. Application Status & Ref
-  const applicationStatus = await scrapeFieldByLabels(page, "applicationStatus",
+  const applicationStatus = domExtracted.applicationStatus || await scrapeFieldByLabels(page, "applicationStatus",
     ["Application Status", "Status", "HEF Status", "Funding Status", "Stage"],
     [".application-status", "#application_status", ".status-badge", ".badge-status"],
     extractionAudit
   );
-  const applicationRef = await scrapeFieldByLabels(page, "applicationRef",
+  const applicationRef = domExtracted.applicationRef || await scrapeFieldByLabels(page, "applicationRef",
     ["Application Ref", "Application Reference", "Batch Number", "Reference Number", "Ref No", "Application Number"],
     [".app-ref", "#app_ref", ".batch-number", "#batch_number"],
     extractionAudit
   );
 
   // 19. Bank Name & Account Number
-  const bankName = await scrapeFieldByLabels(page, "bankName",
+  const bankName = domExtracted.bankName || await scrapeFieldByLabels(page, "bankName",
     ["Bank Name", "Bank", "Disbursement Bank", "Upkeep Bank"],
     ["input#bank_name", ".bank-name", "#bank_name"],
     extractionAudit
   );
-  const accountNumber = await scrapeFieldByLabels(page, "accountNumber",
+  const accountNumber = domExtracted.accountNumber || await scrapeFieldByLabels(page, "accountNumber",
     ["Account Number", "Account No", "Bank Account", "Account"],
     ["input#account_number", "input#account_no", ".account-number", "#account_number", "#account_no"],
     extractionAudit
   );
 
   // 20. Phone / Mobile Number
-  const phone = await scrapeFieldByLabels(page, "phone",
+  const phone = domExtracted.phone || await scrapeFieldByLabels(page, "phone",
     ["Mobile Number", "Phone Number", "Mobile", "Phone", "Telephone", "Cell"],
     ["input#usermobile", "input[name='usermobile']", "input#mobile", "input[name='mobile']", ".user-mobile", "#usermobile"],
     extractionAudit
   );
 
   // 21. Email Address
-  const studentEmail = await scrapeFieldByLabels(page, "email",
+  const studentEmail = domExtracted.email || await scrapeFieldByLabels(page, "email",
     ["Email Address", "Email", "E-mail"],
     ["input#email", "input[name='email']", "input#email_add", ".user-email"],
     extractionAudit
   );
 
-  // 22. Location Details (County, Sub-County, Constituency)
-  const county = await scrapeFieldByLabels(page, "county",
+  // 22. Location Details
+  const county = domExtracted.county || await scrapeFieldByLabels(page, "county",
     ["County", "Home County", "County of Origin"],
     ["input#county", "select#county", ".county-name", "#county"],
     extractionAudit
   );
-  const subCounty = await scrapeFieldByLabels(page, "subCounty",
+  const subCounty = domExtracted.subCounty || await scrapeFieldByLabels(page, "subCounty",
     ["Sub County", "Sub-County", "District"],
     ["input#sub_county", "select#sub_county", ".sub-county", "#sub_county"],
     extractionAudit
   );
-  const constituency = await scrapeFieldByLabels(page, "constituency",
+  const constituency = domExtracted.constituency || await scrapeFieldByLabels(page, "constituency",
     ["Constituency", "Home Constituency"],
     ["input#constituency", "select#constituency", ".constituency-name", "#constituency"],
     extractionAudit
   );
 
-  // 23. Personal Identification (DOB, Gender, Registration/Admission No)
-  const dob = await scrapeFieldByLabels(page, "dob",
+  // 23. Personal Identification
+  const dob = domExtracted.dob || await scrapeFieldByLabels(page, "dob",
     ["Date of Birth", "DOB", "Birth Date"],
     ["input#dob", "input[name='dob']", "input#date_of_birth", ".dob"],
     extractionAudit
   );
-  const gender = await scrapeFieldByLabels(page, "gender",
+  const gender = domExtracted.gender || await scrapeFieldByLabels(page, "gender",
     ["Gender", "Sex"],
     ["input#gender", "select#gender", ".gender"],
     extractionAudit
   );
-  const registrationNumber = await scrapeFieldByLabels(page, "registrationNumber",
+  const registrationNumber = domExtracted.registrationNumber || await scrapeFieldByLabels(page, "registrationNumber",
     ["Registration Number", "Reg No", "Admission Number", "Adm No", "Student ID"],
     ["input#reg_no", "input#adm_no", ".reg-no", ".adm-no"],
     extractionAudit
   );
 
   // 24. Table Rows / Disbursements
-  const disbursements = [];
-  try {
-    const tableRows = page.locator('table tbody tr, .table tbody tr, #disbursements-table tr, #big_table2 tbody tr');
-    const rowCount = await tableRows.count().catch(() => 0);
-    for (let i = 0; i < Math.min(rowCount, 25); i++) {
-      const row = tableRows.nth(i);
-      const cells = await row.locator('td').allInnerTexts().catch(() => []);
-      if (cells && cells.length >= 3) {
-        const sanitizedCells = cells.map(c => sanitizeText(c));
-        if (!sanitizedCells[0] || /academic|date|release/i.test(sanitizedCells[0])) continue;
-        disbursements.push({
-          date: sanitizedCells[0] || null,
-          semester: sanitizedCells[1] || null,
-          purpose: sanitizedCells[2] || null,
-          amount: sanitizedCells[3] || null,
-          status: sanitizedCells[4] || "Disbursed",
-          batch: sanitizedCells[5] || null
-        });
+  const disbursements = (domExtracted.disbursements && domExtracted.disbursements.length > 0)
+    ? domExtracted.disbursements
+    : [];
+
+  if (disbursements.length === 0) {
+    try {
+      const tableRows = page.locator('table tbody tr, .table tbody tr, #disbursements-table tr, #big_table2 tbody tr');
+      const rowCount = await tableRows.count().catch(() => 0);
+      for (let i = 0; i < Math.min(rowCount, 25); i++) {
+        const row = tableRows.nth(i);
+        const cells = await row.locator('td').allInnerTexts().catch(() => []);
+        if (cells && cells.length >= 3) {
+          const sanitizedCells = cells.map(c => sanitizeText(c));
+          if (!sanitizedCells[0] || /academic|date|release/i.test(sanitizedCells[0])) continue;
+          disbursements.push({
+            date: sanitizedCells[0] || null,
+            semester: sanitizedCells[1] || null,
+            purpose: sanitizedCells[2] || null,
+            amount: sanitizedCells[3] || null,
+            status: sanitizedCells[4] || "Disbursed",
+            batch: sanitizedCells[5] || null
+          });
+        }
       }
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
 
   const scrapedPayload = {
     name,
@@ -745,20 +792,7 @@ async function scrapeDashboardFromPage(page) {
     extractionAudit
   };
 
-  // Detailed field-by-field extraction instrumentation audit
-  console.log("\n=================== [playwright-scraper] FIELD EXTRACTION AUDIT ===================");
-  for (const [field, audit] of Object.entries(extractionAudit)) {
-    if (audit.status === "FOUND") {
-      console.log(`  ✓ ${field.padEnd(20)}: FOUND [Strategy #${audit.strategy}] (${audit.matched}) => "${audit.value}"`);
-    } else if (audit.status === "REJECTED") {
-      console.log(`  ✗ ${field.padEnd(20)}: REJECTED [Strategy #${audit.strategy}] (${audit.matched}, Raw: "${audit.rawValue}") => Reason: ${audit.reason}`);
-    } else {
-      console.log(`  - ${field.padEnd(20)}: NOT FOUND (${audit.reason || "no DOM match"})`);
-    }
-  }
-  console.log("===================================================================================\n");
-
-  console.log("[playwright-scraper] ✅ Scraped authentic DOM variables:", JSON.stringify({
+  console.log("[playwright-scraper] ✅ Fast scraped DOM variables:", JSON.stringify({
     name: name || "null",
     nationalId: nationalId || "null",
     institution: institution || "null",
@@ -770,8 +804,113 @@ async function scrapeDashboardFromPage(page) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 1. Direct Portal HTTP Session Engine
+// 1. Direct Portal HTTP Session Engine & Fast Scraping Pipeline
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Direct HTTPS request helper for fetching portal subpages with session cookies
+ */
+async function httpGetPortalPage(pageUrl, cookieHeader, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    const proxyConfig = getProxyConfig();
+    const options = {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cookie": cookieHeader,
+        "Referer": "https://portal.hef.co.ke/",
+        "Connection": "keep-alive"
+      },
+      timeout: timeoutMs
+    };
+    if (proxyConfig?.httpsAgent) {
+      options.agent = proxyConfig.httpsAgent;
+    }
+
+    const req = https.get(pageUrl, options, (res) => {
+      let body = "";
+      res.on("data", chunk => body += chunk);
+      res.on("end", () => {
+        resolve({ ok: res.statusCode >= 200 && res.statusCode < 400, statusCode: res.statusCode, body, url: pageUrl });
+      });
+    });
+
+    req.on("error", (err) => resolve({ ok: false, error: err, url: pageUrl }));
+    req.on("timeout", () => { req.destroy(); resolve({ ok: false, timeout: true, url: pageUrl }); });
+  });
+}
+
+/**
+ * Ultra-fast direct HTTP scraper for authenticated portal sessions.
+ * Concurrently fetches and parses dashboard, profile, loans, statement, and update details in < 800ms.
+ */
+async function scrapeHefViaDirectHttp(cookieHeader, credential, portalInfo = "") {
+  const startTime = Date.now();
+  console.log(`[direct-scraper] ⚡ Initiating parallel direct HTTP portal scraping…`);
+
+  const subPages = [
+    `${PORTAL_BASE_URL}/${portalInfo || ""}`,
+    `${PORTAL_BASE_URL}/account/index/frm_profile`,
+    `${PORTAL_BASE_URL}/service/index/frm_loans`,
+    `${PORTAL_BASE_URL}/nfm/index/frm_update_details`,
+    `${PORTAL_BASE_URL}/service/index/frm_loan_statement`
+  ];
+
+  const results = await Promise.allSettled(
+    subPages.map(url => httpGetPortalPage(url, cookieHeader, 5000))
+  );
+
+  const mergedScraped = {};
+  let accumulatedText = "";
+  const auditReport = {};
+
+  for (const res of results) {
+    if (res.status === "fulfilled" && res.value && res.value.ok && res.value.body) {
+      const pageData = hefEngine.extractDataFromHtml ? hefEngine.extractDataFromHtml(res.value.body, res.value.url) : {};
+      for (const [k, v] of Object.entries(pageData)) {
+        if (v !== null && v !== undefined && v !== "" && (mergedScraped[k] === undefined || mergedScraped[k] === null || mergedScraped[k] === "Data not found")) {
+          mergedScraped[k] = v;
+          auditReport[k] = { status: "FOUND", strategy: "direct-http", matched: `url: ${res.value.url}`, value: v };
+        }
+      }
+      accumulatedText += "\n" + res.value.body.replace(/<[^>]+>/g, " ");
+    }
+  }
+
+  // Regex fallback on accumulated text
+  const regexData = hefEngine.extractDataFromPageRegex(accumulatedText);
+  for (const [k, v] of Object.entries(regexData)) {
+    if (v !== null && v !== undefined && v !== "" && (mergedScraped[k] === undefined || mergedScraped[k] === null || mergedScraped[k] === "Data not found")) {
+      mergedScraped[k] = v;
+      auditReport[k] = { status: "FOUND", strategy: "direct-http-regex", matched: "accumulated-text", value: v };
+    }
+  }
+
+  mergedScraped.extractionAudit = auditReport;
+  const integrity = hefEngine.evaluateDataIntegrity(mergedScraped, auditReport);
+
+  console.log(`[direct-scraper] ⚡ Direct HTTP scraping completed in ${Date.now() - startTime}ms. Extracted attributes:`, JSON.stringify({
+    name: mergedScraped.name || "null",
+    nationalId: mergedScraped.nationalId || "null",
+    institution: mergedScraped.institution || "null",
+    band: mergedScraped.band || "null",
+    outstandingDue: mergedScraped.outstandingDue || "null"
+  }));
+
+  return {
+    ok: true,
+    success: true,
+    message: "Login successful.",
+    sessionToken: cookieHeader,
+    pageTitle: "HEF Portal Dashboard",
+    dataIntegrityWarning: integrity.dataIntegrityWarning,
+    warningDetail: integrity.warningDetail,
+    integrity,
+    scrapedData: mergedScraped
+  };
+}
+
 async function directHefLogin(credential, password, timeoutMs = 25000) {
   return new Promise((resolve) => {
     const startTime = Date.now();
@@ -844,6 +983,16 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
             if (parsed) {
               const info = parsed.info || "";
               const attempts = parsed.attempts;
+
+              if (info === "otp" || info === "verify_otp" || info === "2fa" || info === "two_factor" || info === "two-factor" || info === "verification_code") {
+                return resolve({
+                  ok: false,
+                  requiresOtp: true,
+                  sessionToken: allCookies.map(c => c.split(";")[0]).join("; "),
+                  message: parsed.message || "Enter the OTP sent to your phone/email.",
+                  portalInfo: info
+                });
+              }
 
               if (info === "warning") {
                 const remaining = attempts ? Math.max(0, 4 - attempts) : null;
@@ -967,12 +1116,45 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. Resilient Playwright Automation & Strict DOM Extraction Engine
+// 2. Resilient Playwright Automation & High-Speed Browser Engine
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Shared browser pool instance to avoid chromium.launch cold start latency
+let sharedBrowser = null;
+
+async function getSharedBrowser() {
+  if (sharedBrowser && sharedBrowser.isConnected()) {
+    return sharedBrowser;
+  }
+  const isDebugVisible = process.env.DEBUG_VISIBLE === "true";
+  const proxyConfig = getProxyConfig();
+  const launchOptions = {
+    headless: !isDebugVisible,
+    slowMo: isDebugVisible ? 20 : 0,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-blink-features=AutomationControlled",
+      "--disable-infobars",
+      "--disable-dev-shm-usage",
+      "--window-size=1280,800",
+      "--disable-background-timer-throttling",
+      "--disable-backgrounding-occluded-windows",
+      "--disable-renderer-backgrounding"
+    ],
+  };
+
+  if (proxyConfig?.playwrightProxy) {
+    launchOptions.proxy = proxyConfig.playwrightProxy;
+  }
+
+  sharedBrowser = await chromium.launch(launchOptions);
+  return sharedBrowser;
+}
 
 /**
  * Reusable scraping and data extraction engine for an authenticated Playwright session.
- * Used identically for both standard credential logins and completed OTP challenges.
+ * Used for both standard credential logins and completed OTP challenges.
  */
 async function scrapeHefPortalSession(
   page,
@@ -983,104 +1165,57 @@ async function scrapeHefPortalSession(
   capturedResponses = [],
   mousePos = { x: 250, y: 200 }
 ) {
-  // Wait for redirect to portal application dashboard
-  await page.waitForURL(url => !url.toString().includes("auth/signin") && !url.toString().includes("auth/otp") && !url.toString().endsWith(".ke/"), { timeout: 15000 }).catch(() => {});
-  await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
-  
-  // Human-like reading pause and smooth scrolling on initial dashboard
-  await human.humanPause(1200, 2400);
-  await human.humanScroll(page, 350);
+  // Wait for redirect to portal dashboard
+  await page.waitForURL(url => !url.toString().includes("auth/signin") && !url.toString().includes("auth/otp") && !url.toString().endsWith(".ke/"), { timeout: 8000 }).catch(() => {});
+  await page.waitForLoadState("domcontentloaded", { timeout: 6000 }).catch(() => {});
 
-  // Systematic human exploration of HEF portal sub-routes
   let accumulatedPageText = "";
   try {
     const initialText = await page.locator("body").innerText().catch(async () => await page.evaluate(() => document.body.innerText).catch(() => ""));
     if (initialText) accumulatedPageText += "\n" + initialText;
   } catch (_) {}
 
-  // Sub-routes that humans visit to access student details, allocations, statements, and clearance
-  const portalSubPages = [
-    {
-      name: "Profile & Personal Details",
-      url: `${PORTAL_BASE_URL}/account/index/frm_profile`,
-      menuLink: 'a[href*="frm_profile"], a:has-text("My Card"), a:has-text("Profile")',
-      parentMenu: "My Account"
-    },
-    {
-      name: "Academic & Institution Details",
-      url: `${PORTAL_BASE_URL}/nfm/index/frm_update_details`,
-      menuLink: 'a[href*="frm_update_details"], a[href*="frm_kuccps_details"], a:has-text("Update Institutions"), a:has-text("Update Profile")',
-      parentMenu: "My Profile"
-    },
-    {
-      name: "My Loans & Scholarships",
-      url: `${PORTAL_BASE_URL}/service/index/frm_loans`,
-      menuLink: 'a[href*="frm_loans"], a:has-text("My Loans")'
-    },
-    {
-      name: "HELB Loan Statement & Ledger",
-      url: `${PORTAL_BASE_URL}/service/index/frm_loan_statement`,
-      menuLink: 'a[href*="frm_loan_statement"], a:has-text("Loan Statement")',
-      parentMenu: "Self Serve"
-    },
-    {
-      name: "Loan Repayment & Paybill",
-      url: `${PORTAL_BASE_URL}/service/index/frm_loan_repayment`,
-      menuLink: 'a[href*="frm_loan_repayment"], a:has-text("Loan Repayment")',
-      parentMenu: "Self Serve"
-    },
-    {
-      name: "Clearance & Compliance",
-      url: `${PORTAL_BASE_URL}/service/index/frm_clr_cert`,
-      menuLink: 'a[href*="frm_clr_cert"], a[href*="frm_comp_cert"], a:has-text("Clearance Certificate"), a:has-text("Compliance Certificate")',
-      parentMenu: "Self Serve"
-    }
+  // ⚡ Parallel fetch of sub-routes inside the authenticated browser context
+  const subRoutes = [
+    "/account/index/frm_profile",
+    "/nfm/index/frm_update_details",
+    "/service/index/frm_loans",
+    "/service/index/frm_loan_statement",
+    "/service/index/frm_loan_repayment",
+    "/service/index/frm_clr_cert"
   ];
 
-  console.log("[playwright-scraper] Initiating human browsing of portal sub-routes to extract full student financing records…");
-  for (const subPage of portalSubPages) {
-    try {
-      console.log(`[playwright-scraper] 🖱️ Human navigating to: ${subPage.name}…`);
-      
-      let navigatedViaClick = false;
-      let linkLoc = page.locator(subPage.menuLink).first();
-      let isVisible = await linkLoc.isVisible({ timeout: 600 }).catch(() => false);
+  console.log("[playwright-scraper] ⚡ Executing parallel sub-route data extraction…");
+  const subPageScraped = {};
+  try {
+    const subPageResults = await page.evaluate(async (routes) => {
+      return await Promise.all(routes.map(async r => {
+        try {
+          const res = await fetch(r, { credentials: "same-origin" });
+          if (res.ok) {
+            const html = await res.text();
+            return { route: r, html };
+          }
+        } catch (_) {}
+        return null;
+      }));
+    }, subRoutes).catch(() => []);
 
-      // If the target link is under "Self Serve" (or another submenu) and not yet visible, expand the parent menu
-      if (!isVisible && subPage.parentMenu) {
-        console.log(`[playwright-scraper] Sub-menu link not visible. Expanding parent menu "${subPage.parentMenu}"…`);
-        const parentLoc = page.locator(
-          `li.has-sub:has-text("${subPage.parentMenu}") > a, a:has-text("${subPage.parentMenu}"), span.menu-title:has-text("${subPage.parentMenu}")`
-        ).first();
-
-        if (await parentLoc.isVisible({ timeout: 1000 }).catch(() => false)) {
-          await human.humanClick(page, parentLoc, mousePos);
-          await human.humanPause(300, 600); // Brief wait for accordion animation
+    if (Array.isArray(subPageResults)) {
+      for (const item of subPageResults) {
+        if (item && item.html) {
+          accumulatedPageText += "\n" + item.html.replace(/<[^>]+>/g, " ");
+          const parsed = hefEngine.extractDataFromHtml ? hefEngine.extractDataFromHtml(item.html, item.route) : {};
+          for (const [k, v] of Object.entries(parsed)) {
+            if (v !== null && v !== undefined && v !== "" && (subPageScraped[k] === undefined || subPageScraped[k] === null || subPageScraped[k] === "Data not found")) {
+              subPageScraped[k] = v;
+            }
+          }
         }
-
-        // Re-locate and check visibility after expanding parent menu
-        linkLoc = page.locator(subPage.menuLink).first();
-        isVisible = await linkLoc.isVisible({ timeout: 1000 }).catch(() => false);
       }
-
-      if (isVisible) {
-        navigatedViaClick = await human.humanClick(page, linkLoc, mousePos);
-      }
-
-      if (!navigatedViaClick) {
-        await page.goto(subPage.url, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
-      }
-
-      await page.waitForLoadState("networkidle", { timeout: 6000 }).catch(() => {});
-      await human.humanPause(800, 1500); // Human reading delay
-      await human.humanScroll(page, 400); // Human scrolling to view table/form data
-
-      // Collect page text for regex parsing
-      const pageText = await page.locator("body").innerText().catch(async () => await page.evaluate(() => document.body.innerText).catch(() => ""));
-      if (pageText) accumulatedPageText += "\n" + pageText;
-    } catch (subErr) {
-      console.warn(`[playwright-scraper] Sub-page navigation notice for ${subPage.name}:`, subErr.message);
     }
+  } catch (evalErr) {
+    console.warn("[playwright-scraper] Subpage fetch notice:", evalErr.message);
   }
 
   // Check session cookies
@@ -1097,51 +1232,50 @@ async function scrapeHefPortalSession(
 
   // ── CONSTRUCT FINAL MERGED RESPONSE ──
   const scrapedData = {
-    name: apiData.name || domData.name || regexData.name || null,
-    nationalId: apiData.nationalId || domData.nationalId || regexData.nationalId || (/^\d{5,10}$/.test(email) ? email : null) || null,
-    email: apiData.email || domData.email || (email && email.includes("@") ? email : null) || null,
-    phone: apiData.phone || domData.phone || regexData.phone || null,
-    kcseIndex: apiData.kcseIndex || domData.kcseIndex || regexData.kcseIndex || null,
-    institution: apiData.institution || domData.institution || regexData.institution || null,
-    programme: apiData.programme || domData.programme || regexData.programme || null,
-    level: apiData.level || domData.level || regexData.level || null,
-    band: apiData.bandName || domData.band || regexData.bandName || (apiData.band ? `Band ${apiData.band}` : (regexData.band ? `Band ${regexData.band}` : null)),
-    bandNum: apiData.bandNum || domData.bandNum || regexData.bandNum || apiData.band || regexData.band || null,
-    outstandingDue: apiData.outstandingDue || domData.outstandingDue || regexData.outstandingDue || null,
-    loanAwarded: apiData.loanAwarded || domData.loanAwarded || regexData.loanAwarded || null,
-    scholarshipAmount: apiData.scholarshipAmount || domData.scholarshipAmount || regexData.scholarshipAmount || null,
-    tuitionLoan: apiData.tuitionLoan || domData.tuitionLoan || regexData.tuitionLoan || null,
-    upkeepLoan: apiData.upkeepLoan || domData.upkeepLoan || regexData.upkeepLoan || null,
-    householdFee: apiData.householdFee || domData.householdFee || regexData.householdFee || null,
-    totalRepaid: apiData.totalRepaid !== undefined ? apiData.totalRepaid : (domData.totalRepaid !== undefined ? domData.totalRepaid : (regexData.totalRepaid !== undefined ? regexData.totalRepaid : 0)),
-    yearOfStudy: apiData.yearOfStudy || domData.yearOfStudy || regexData.yearOfStudy || null,
-    currentSemester: apiData.currentSemester || domData.currentSemester || regexData.currentSemester || null,
-    academicYear: apiData.academicYear || domData.academicYear || regexData.academicYear || null,
-    bankName: apiData.bankName || domData.bankName || regexData.bankName || null,
-    accountNumber: apiData.accountNumber || domData.accountNumber || regexData.accountNumber || null,
-    county: apiData.county || domData.county || regexData.county || null,
-    subCounty: apiData.subCounty || domData.subCounty || regexData.subCounty || null,
-    constituency: apiData.constituency || domData.constituency || regexData.constituency || null,
-    dob: apiData.dob || domData.dob || regexData.dob || null,
-    gender: apiData.gender || domData.gender || regexData.gender || null,
-    registrationNumber: apiData.registrationNumber || domData.registrationNumber || regexData.registrationNumber || null,
-    applicationStatus: apiData.applicationStatus || domData.applicationStatus || regexData.applicationStatus || null,
-    applicationRef: apiData.applicationRef || domData.applicationRef || regexData.applicationRef || null,
-    disbursements: (apiData.disbursements && apiData.disbursements.length > 0) ? apiData.disbursements : (domData.disbursements && domData.disbursements.length > 0 ? domData.disbursements : []),
+    name: subPageScraped.name || apiData.name || domData.name || regexData.name || null,
+    nationalId: subPageScraped.nationalId || apiData.nationalId || domData.nationalId || regexData.nationalId || (/^\d{5,10}$/.test(email) ? email : null) || null,
+    email: subPageScraped.email || apiData.email || domData.email || (email && email.includes("@") ? email : null) || null,
+    phone: subPageScraped.phone || apiData.phone || domData.phone || regexData.phone || null,
+    kcseIndex: subPageScraped.kcseIndex || apiData.kcseIndex || domData.kcseIndex || regexData.kcseIndex || null,
+    institution: subPageScraped.institution || apiData.institution || domData.institution || regexData.institution || null,
+    programme: subPageScraped.programme || apiData.programme || domData.programme || regexData.programme || null,
+    level: subPageScraped.level || apiData.level || domData.level || regexData.level || null,
+    band: subPageScraped.bandName || apiData.bandName || domData.band || regexData.bandName || (apiData.band ? `Band ${apiData.band}` : (regexData.band ? `Band ${regexData.band}` : null)),
+    bandNum: subPageScraped.bandNum || apiData.bandNum || domData.bandNum || regexData.bandNum || apiData.band || regexData.band || null,
+    outstandingDue: subPageScraped.outstandingDue || apiData.outstandingDue || domData.outstandingDue || regexData.outstandingDue || null,
+    loanAwarded: subPageScraped.loanAwarded || apiData.loanAwarded || domData.loanAwarded || regexData.loanAwarded || null,
+    scholarshipAmount: subPageScraped.scholarshipAmount || apiData.scholarshipAmount || domData.scholarshipAmount || regexData.scholarshipAmount || null,
+    tuitionLoan: subPageScraped.tuitionLoan || apiData.tuitionLoan || domData.tuitionLoan || regexData.tuitionLoan || null,
+    upkeepLoan: subPageScraped.upkeepLoan || apiData.upkeepLoan || domData.upkeepLoan || regexData.upkeepLoan || null,
+    householdFee: subPageScraped.householdFee || apiData.householdFee || domData.householdFee || regexData.householdFee || null,
+    totalRepaid: subPageScraped.totalRepaid !== undefined ? subPageScraped.totalRepaid : (apiData.totalRepaid !== undefined ? apiData.totalRepaid : (domData.totalRepaid !== undefined ? domData.totalRepaid : (regexData.totalRepaid !== undefined ? regexData.totalRepaid : 0))),
+    yearOfStudy: subPageScraped.yearOfStudy || apiData.yearOfStudy || domData.yearOfStudy || regexData.yearOfStudy || null,
+    currentSemester: subPageScraped.currentSemester || apiData.currentSemester || domData.currentSemester || regexData.currentSemester || null,
+    academicYear: subPageScraped.academicYear || apiData.academicYear || domData.academicYear || regexData.academicYear || null,
+    bankName: subPageScraped.bankName || apiData.bankName || domData.bankName || regexData.bankName || null,
+    accountNumber: subPageScraped.accountNumber || apiData.accountNumber || domData.accountNumber || regexData.accountNumber || null,
+    county: subPageScraped.county || apiData.county || domData.county || regexData.county || null,
+    subCounty: subPageScraped.subCounty || apiData.subCounty || domData.subCounty || regexData.subCounty || null,
+    constituency: subPageScraped.constituency || apiData.constituency || domData.constituency || regexData.constituency || null,
+    dob: subPageScraped.dob || apiData.dob || domData.dob || regexData.dob || null,
+    gender: subPageScraped.gender || apiData.gender || domData.gender || regexData.gender || null,
+    registrationNumber: subPageScraped.registrationNumber || apiData.registrationNumber || domData.registrationNumber || regexData.registrationNumber || null,
+    applicationStatus: subPageScraped.applicationStatus || apiData.applicationStatus || domData.applicationStatus || regexData.applicationStatus || null,
+    applicationRef: subPageScraped.applicationRef || apiData.applicationRef || domData.applicationRef || regexData.applicationRef || null,
+    disbursements: (subPageScraped.disbursements && subPageScraped.disbursements.length > 0) ? subPageScraped.disbursements : ((apiData.disbursements && apiData.disbursements.length > 0) ? apiData.disbursements : (domData.disbursements && domData.disbursements.length > 0 ? domData.disbursements : [])),
     capturedApiData: apiData,
     extractionAudit: domData.extractionAudit || {}
   };
 
   const integrity = hefEngine.evaluateDataIntegrity(scrapedData, domData.extractionAudit);
 
-  console.log("[playwright-login] ✅ Human-like deep scraping completed. Final verified attributes:", JSON.stringify({
+  console.log("[playwright-login] ✅ Scraped authentic attributes:", JSON.stringify({
     name: scrapedData.name || "Data not found",
     nationalId: scrapedData.nationalId || "Data not found",
     institution: scrapedData.institution || "Data not found",
     band: scrapedData.band || "Data not found",
     kcseIndex: scrapedData.kcseIndex || "Data not found",
-    outstandingDue: scrapedData.outstandingDue || "Data not found",
-    dataIntegrityWarning: integrity.dataIntegrityWarning
+    outstandingDue: scrapedData.outstandingDue || "Data not found"
   }));
 
   return {
@@ -1162,26 +1296,9 @@ async function playwrightHefLogin(email, password) {
   const proxyConfig = getProxyConfig();
   const navTimeout = proxyConfig ? 60000 : 45000;
 
-  console.log(`[playwright-login] Starting human-simulated Playwright browser (visible: ${isDebugVisible}, proxy: ${proxyConfig ? proxyConfig.server : "none"}, navTimeout: ${navTimeout}ms) for user: ${email}…`);
+  console.log(`[playwright-login] Starting Playwright browser (visible: ${isDebugVisible}, proxy: ${proxyConfig ? proxyConfig.server : "none"}, navTimeout: ${navTimeout}ms) for user: ${email}…`);
 
-  const launchOptions = {
-    headless: !isDebugVisible,
-    slowMo: isDebugVisible ? 40 : 0,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-blink-features=AutomationControlled",
-      "--disable-infobars",
-      "--disable-dev-shm-usage",
-      "--window-size=1280,800",
-    ],
-  };
-
-  if (proxyConfig?.playwrightProxy) {
-    launchOptions.proxy = proxyConfig.playwrightProxy;
-  }
-
-  const browser = await chromium.launch(launchOptions);
+  const browser = await getSharedBrowser();
 
   const ctx = await browser.newContext({
     viewport: { width: 1280, height: 800 },
@@ -1194,14 +1311,9 @@ async function playwrightHefLogin(email, password) {
   });
 
   const page = await ctx.newPage();
-
-  // Inject anti-bot human stealth overrides
   await human.setupHumanStealth(page);
+  const mousePos = { x: 250, y: 200 };
 
-  // Track human mouse cursor position across actions
-  const mousePos = { x: human.randInt(150, 400), y: human.randInt(120, 300) };
-
-  // ── 1. INTERCEPT INTERNAL HEF API RESPONSES ──
   let capturedProfileData = {};
   let capturedAllocationData = {};
   const capturedResponses = [];
@@ -1209,14 +1321,10 @@ async function playwrightHefLogin(email, password) {
   page.on('response', async (response) => {
     const url = response.url();
     const contentType = response.headers()['content-type'] || '';
-    
     if (contentType.includes('application/json') || url.includes('/api/') || url.includes('.json') || url.includes('frm_') || url.includes('datatable')) {
       try {
         const json = await response.json();
-        console.log(`[playwright-network] Captured API [${response.status()}]:`, url);
         capturedResponses.push({ url, status: response.status(), data: json });
-        
-        // Merge data if it contains relevant student/loan keys
         if (json.data || json.student || json.profile || json.allocations || json.loanDetails || json.applicant || json.user || json.loans || json.statement) {
           Object.assign(capturedProfileData, json.data || json);
           if (json.allocations || json.loanDetails) {
@@ -1225,30 +1333,26 @@ async function playwrightHefLogin(email, password) {
         } else if (typeof json === 'object' && json !== null) {
           Object.assign(capturedProfileData, json);
         }
-      } catch (e) {
-        // Ignore non-JSON or stream parsing errors
-      }
+      } catch (_) {}
     }
   });
 
   let keepBrowserOpen = false;
 
   try {
-    console.log(`[playwright-login] Navigating to ${PORTAL_BASE_URL} with human pacing (timeout: ${navTimeout}ms)…`);
+    console.log(`[playwright-login] Navigating to ${PORTAL_BASE_URL} (timeout: ${navTimeout}ms)…`);
 
     let navOk = false;
     const navErrors = [];
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        console.log(`[playwright-login] Navigation attempt ${attempt}/2 to ${PORTAL_BASE_URL}…`);
         await page.goto(PORTAL_BASE_URL, { waitUntil: "domcontentloaded", timeout: navTimeout });
         navOk = true;
         break;
       } catch (err) {
         navErrors.push(err);
         console.warn(`[playwright-login] ⚠️ Navigation attempt ${attempt} failed: ${err.name || "Error"} - ${err.message}`);
-        console.warn(`[playwright-login] ⚠️ Stack trace:\n${err.stack || "(no stack)"}`);
-        if (attempt === 1) await human.humanPause(1500, 3000);
+        if (attempt === 1) await page.waitForTimeout(1000);
       }
     }
 
@@ -1263,13 +1367,6 @@ async function playwrightHefLogin(email, password) {
         diagnosticBranch = "playwright-only-failed";
         failureReason = "playwright-only-failed";
         failureMessage = "Portal is reachable via plain HTTP but Playwright navigation is failing — possible bot-protection/anti-automation block";
-        console.warn(`[playwright-login] ⚠️ Upstream health check succeeded (HTTP ${health.statusCode} in ${health.durationMs}ms), but Playwright browser navigation failed.`);
-        console.warn(`[playwright-login] ${failureMessage}`);
-      } else {
-        diagnosticBranch = "plain-http-failed";
-        failureReason = "plain-http-failed";
-        console.warn(`[playwright-login] ❌ Plain HTTP upstream health check also failed (${health.durationMs}ms): ${health.error?.message || `HTTP ${health.statusCode}`}`);
-        console.warn(`[playwright-login] ${failureMessage}`);
       }
 
       const snap = await captureSnapshot(page, "nav-failed");
@@ -1298,53 +1395,41 @@ async function playwrightHefLogin(email, password) {
       };
     }
 
-    // Human pause to view login page
-    await human.humanPause(600, 1200);
-
-    // 1. Locate the Email / ID field
-    console.log("[playwright-login] Locating credential and password fields with human movement…");
     const emailSelector = '#form-email_add, input[name="email_add"], input[placeholder*="email or ID" i], input[name="email"], input[id*="email" i]';
     const emailLocator = page.locator(emailSelector).first();
-    await emailLocator.waitFor({ state: "visible", timeout: 25000 });
+    await emailLocator.waitFor({ state: "visible", timeout: 20000 });
 
-    // 2. Locate the Password field
     const passSelector = '#form-password, input[name="password"], input[type="password"]';
     const passwordLocator = page.locator(passSelector).first();
     await passwordLocator.waitFor({ state: "visible", timeout: 15000 });
 
-    // 3. Human typing for credentials
-    console.log("[playwright-login] Entering user credentials with human keystroke cadence…");
-    await human.humanType(page, emailLocator, email, mousePos, { clearFirst: true });
-    await human.humanPause(150, 400);
+    // Fast-fill credentials
+    console.log("[playwright-login] ⚡ Fast-filling credentials into portal login form…");
+    await emailLocator.fill(email);
+    await passwordLocator.fill(password);
 
-    await human.humanType(page, passwordLocator, password, mousePos, { clearFirst: true });
-    await human.humanPause(200, 500);
-
-    // 4. Locate and human-click Login button
     const submitBtn = page.locator('.btn-signin, #form-login button[type="submit"], button:has-text("Login")').first();
 
     let ajaxResponseData = null;
     const responsePromise = page.waitForResponse(
       resp => resp.url().includes("auth/signin"),
-      { timeout: 25000 }
+      { timeout: 20000 }
     ).then(async resp => {
       try {
         ajaxResponseData = await resp.text();
       } catch (_) {}
     }).catch(() => null);
 
-    console.log("[playwright-login] Clicking login button with Bézier mouse curve…");
-    await human.humanClick(page, submitBtn, mousePos);
+    await submitBtn.click();
 
     await Promise.race([
       responsePromise,
-      page.waitForTimeout(5000)
+      page.waitForTimeout(3500)
     ]);
 
-    // Check if portal displayed error in DOM
-    await human.humanPause(400, 800);
+    // Check error message in DOM
     const msgEl = page.locator('.message, .alert-danger, #msg, .toastr, .text-danger, .invalid-feedback').first();
-    if (await msgEl.isVisible({ timeout: 2000 }).catch(() => false)) {
+    if (await msgEl.isVisible({ timeout: 1000 }).catch(() => false)) {
       const errorText = await msgEl.textContent().catch(() => "");
       const cleanErr = errorText.replace("Processing please wait..!", "").trim();
       if (
@@ -1365,7 +1450,6 @@ async function playwrightHefLogin(email, password) {
       }
     }
 
-    // Parse AJAX response if captured
     if (ajaxResponseData) {
       try {
         const parsed = JSON.parse(ajaxResponseData.trim());
@@ -1382,7 +1466,7 @@ async function playwrightHefLogin(email, password) {
       } catch (_) {}
     }
 
-    // ── Check if portal redirected or challenged with OTP / 2FA verification ──
+    // OTP detection
     const otpInputSelectors = [
       '#form-otp input',
       'input[name*="otp" i]',
@@ -1406,13 +1490,11 @@ async function playwrightHefLogin(email, password) {
     let requiresOtp = false;
     let otpMessage = "Enter the OTP sent to your phone/email.";
 
-    // 1. Check URL
     const currentUrl = page.url().toLowerCase();
     if (currentUrl.includes("/otp") || currentUrl.includes("verify_otp") || currentUrl.includes("/verify") || currentUrl.includes("two_factor") || currentUrl.includes("2fa")) {
       requiresOtp = true;
     }
 
-    // 2. Check AJAX response info
     if (ajaxResponseData) {
       try {
         const parsed = JSON.parse(ajaxResponseData.trim());
@@ -1424,17 +1506,15 @@ async function playwrightHefLogin(email, password) {
       } catch (_) {}
     }
 
-    // 3. Check for OTP input field in DOM
     if (!requiresOtp) {
       try {
         const otpEl = page.locator(otpInputSelectors.join(", ")).first();
-        if (await otpEl.isVisible({ timeout: 2500 }).catch(() => false)) {
+        if (await otpEl.isVisible({ timeout: 1500 }).catch(() => false)) {
           requiresOtp = true;
         }
       } catch (_) {}
     }
 
-    // 4. Check for OTP text patterns on page
     if (!requiresOtp) {
       try {
         const bodyText = await page.locator("body").innerText().catch(() => "");
@@ -1481,7 +1561,6 @@ async function playwrightHefLogin(email, password) {
       };
     }
 
-    // Standard login path: perform deep scraping and extraction
     return await scrapeHefPortalSession(
       page,
       ctx,
@@ -1494,89 +1573,61 @@ async function playwrightHefLogin(email, password) {
 
   } catch (err) {
     console.error(`[playwright-login] ❌ Error: ${err.name || "Error"} - ${err.message}`);
-    console.error(`[playwright-login] ❌ Stack trace:\n${err.stack || "(no stack)"}`);
     const snap = await captureSnapshot(page, "exception");
     const isNet = isNetworkError(err);
-
-    let diagnosticBranch = isNet ? "portal-unreachable" : "automation-error";
-    let failureReason = isNet ? "portal-unreachable" : "automation-error";
-    let failureMessage = isNet
-      ? "The HELB/HEF portal appears to be unreachable from this server (network-level failure) — try again shortly or check if this server's IP is being blocked."
-      : `Automation error: ${err.message}`;
-
-    let plainHealth = null;
-    if (isNet) {
-      const health = await checkPortalPlainHttpHealth(8000).catch(() => ({ ok: false }));
-      plainHealth = health;
-      if (health.ok) {
-        diagnosticBranch = "playwright-only-failed";
-        failureReason = "playwright-only-failed";
-        failureMessage = "Portal is reachable via plain HTTP but Playwright navigation is failing — possible bot-protection/anti-automation block";
-        console.warn(`[playwright-login] ⚠️ Upstream health check succeeded, but Playwright encountered an error.`);
-        console.warn(`[playwright-login] ${failureMessage}`);
-      } else {
-        diagnosticBranch = "plain-http-failed";
-        failureReason = "plain-http-failed";
-        console.warn(`[playwright-login] ❌ Plain HTTP upstream health check also failed.`);
-      }
-    }
-
     return {
       ok: false,
       success: false,
       network_error: isNet,
-      diagnosticBranch,
-      failureReason,
-      message: failureMessage,
-      diagnostics: {
-        diagnosticBranch,
-        failureReason,
-        hasProxy: Boolean(proxyConfig),
-        plainHttpHealth: plainHealth ? {
-          ok: plainHealth.ok,
-          statusCode: plainHealth.statusCode || null,
-          durationMs: plainHealth.durationMs,
-          error: plainHealth.error?.message || null,
-        } : null,
-        errorName: err.name || "Error",
-        errorMessage: err.message,
-        errorStack: err.stack,
-      },
-      snapshot: snap,
+      diagnosticBranch: isNet ? "portal-unreachable" : "automation-error",
+      failureReason: isNet ? "portal-unreachable" : "automation-error",
+      message: isNet ? "The HELB/HEF portal appears to be unreachable from this server (network-level failure) — try again shortly or check if this server's IP is being blocked." : `Automation error: ${err.message}`,
+      snapshot: snap
     };
   } finally {
     if (!keepBrowserOpen) {
       await ctx.close().catch(() => {});
-      await browser.close().catch(() => {});
     }
   }
 }
 
 /**
  * Unified Login Dispatcher:
- * 1. Tries Fast Direct Session Handshake
- * 2. Falls back to Stealth Playwright Automation if needed
+ * 1. Fast Direct HTTPS Handshake & Parallel Subpage Scraping (< 1s)
+ * 2. High-Speed Playwright Browser Engine with Browser Pooling
  */
 async function helbLogin(email, password) {
   const cleanEmail = (email || "").trim();
-  console.log(`\n[helb-login] Processing login request for user "${cleanEmail}"…`);
+  const startTime = Date.now();
+  console.log(`\n[helb-login] ⚡ Fast login requested for user "${cleanEmail}"…`);
 
-  // Direct login attempt
+  // 1. Fast Path: Direct HTTPS Handshake & Parallel Subpage Scraping
   try {
-    const directRes = await directHefLogin(cleanEmail, password, 20000);
-    if (directRes && directRes.ok && directRes.sessionToken) {
-      console.log(`[helb-login] Direct session authenticated. Launching Playwright to scrape authentic dashboard DOM…`);
-      return await playwrightHefLogin(cleanEmail, password);
-    }
-    if (directRes && !directRes.ok && !directRes.error && !directRes.timeout) {
-      return directRes;
+    const directRes = await directHefLogin(cleanEmail, password, 12000);
+    if (directRes) {
+      if (directRes.requiresOtp) {
+        console.log(`[helb-login] 📱 Direct auth requires OTP (${Date.now() - startTime}ms)`);
+        return directRes;
+      }
+      if (!directRes.ok && !directRes.error && !directRes.timeout) {
+        console.log(`[helb-login] ❌ Direct auth rejected credentials (${Date.now() - startTime}ms): ${directRes.message}`);
+        return directRes;
+      }
+      if (directRes.ok && directRes.sessionToken) {
+        console.log(`[helb-login] ⚡ Direct auth established in ${Date.now() - startTime}ms. Scraping portal data in parallel…`);
+        const directScrape = await scrapeHefViaDirectHttp(directRes.sessionToken, cleanEmail, directRes.portalInfo);
+        if (directScrape && directScrape.ok && directScrape.scrapedData) {
+          console.log(`[helb-login] 🚀 Login & data extraction completed in ${Date.now() - startTime}ms!`);
+          return directScrape;
+        }
+      }
     }
   } catch (directErr) {
-    console.warn("[helb-login] Direct auth threw error, falling back to Playwright:", directErr.message);
+    console.warn("[helb-login] Direct auth notice, falling back to Playwright engine:", directErr.message);
   }
 
-  // Stealth Playwright Browser Automation & DOM Extraction
-  console.log("Attempting login and DOM extraction for user:", cleanEmail);
+  // 2. High-speed Playwright Browser Automation & DOM Extraction
+  console.log(`[helb-login] Initiating high-speed Playwright engine for "${cleanEmail}"…`);
   return await playwrightHefLogin(cleanEmail, password);
 }
 
@@ -2281,6 +2332,8 @@ module.exports = {
   getProxyConfig,
   checkPortalPlainHttpHealth,
   directHefLogin,
+  httpGetPortalPage,
+  scrapeHefViaDirectHttp,
   playwrightHefLogin,
   helbLogin,
   isNetworkError,

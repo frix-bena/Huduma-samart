@@ -501,7 +501,7 @@ async function stream(text, el, g) {
   for (let i = 0; i < words.length; i++) {
     if (GEN !== g) throw "stale";
     el.innerHTML += (i > 0 ? " " : "") + words[i];
-    await rawWait(12 + Math.random() * 16);
+    await rawWait(2 + Math.random() * 4);
   }
 }
 
@@ -754,7 +754,6 @@ async function performLogin(email, password) {
       password: userPasswordState,
       credential: userEmailState
     });
-    await rawWait(450);
     tc.classList.add("tool-done");
     hideTyping();
 
@@ -829,7 +828,6 @@ async function submitOtp(otpCode, otpSessionId) {
       email: userEmailState
     });
 
-    await rawWait(450);
     tc.classList.add("tool-done");
     hideTyping();
 
@@ -1710,7 +1708,7 @@ async function processHelbMessage(text, g) {
   // Band Breakdown & Scholarship
   if (/band|scholarship|means test|mti|funding model|how much scholarship|percentage/i.test(t)) {
     const tc = renderToolCard("get_hef_band_breakdown", { email: S.email, nationalId: S.nationalId, name: S.name, band: S.band });
-    await rawWait(300); tc.classList.add("tool-done");
+    tc.classList.add("tool-done");
     return {
       text: `Here is your official Kenya Higher Education Financing (HEF) funding structure for **${S.name || S.email}**:`,
       html: cardBandBreakdown(p)
@@ -1720,7 +1718,7 @@ async function processHelbMessage(text, g) {
   // Balance & Dues
   if (/balance|outstanding|how much do i owe|dues|interest rate/i.test(t)) {
     const tc = renderToolCard("get_loan_balance", { email: S.email, nationalId: S.nationalId, name: S.name });
-    await rawWait(300); tc.classList.add("tool-done");
+    tc.classList.add("tool-done");
     return {
       text: `Here is your current HELB loan overview and outstanding balance for **${S.name || S.email}**:`,
       html: cardBalance(p)
@@ -1730,7 +1728,7 @@ async function processHelbMessage(text, g) {
   // Disbursements & Upkeep
   if (/disburse|disbursement|schedule|upkeep|paid out|when will i receive|where is my upkeep/i.test(t)) {
     const tc = renderToolCard("get_disbursement_schedule", { email: S.email, nationalId: S.nationalId, name: S.name });
-    await rawWait(300); tc.classList.add("tool-done");
+    tc.classList.add("tool-done");
     return {
       text: `Here is your scheduled and released disbursements timeline for **${S.name || S.email}**:`,
       html: cardDisb(p.disbursements)
@@ -1740,7 +1738,7 @@ async function processHelbMessage(text, g) {
   // Application Status & MTI
   if (/application|status|progress|approved|tracking|mti score|stage/i.test(t)) {
     const tc = renderToolCard("get_application_status", { email: S.email, nationalId: S.nationalId, name: S.name });
-    await rawWait(300); tc.classList.add("tool-done");
+    tc.classList.add("tool-done");
     return {
       text: `Here is the current processing stage of your HEF loan and scholarship application for **${S.name || S.email}**:`,
       html: cardAppStatus(p)
@@ -1750,7 +1748,7 @@ async function processHelbMessage(text, g) {
   // Repayment & Paybill
   if (/repay|repayment|paybill|how to pay|mpesa|200800|pay back/i.test(t)) {
     const tc = renderToolCard("get_repayment_details", { email: S.email, nationalId: S.nationalId, name: S.name });
-    await rawWait(300); tc.classList.add("tool-done");
+    tc.classList.add("tool-done");
     return {
       text: `You can repay your HELB loan directly via M-Pesa Paybill **200800** for **${S.name || S.email}**:`,
       html: cardRepaymentGuide(p)
@@ -1760,7 +1758,7 @@ async function processHelbMessage(text, g) {
   // Loan Statement
   if (/statement|ledger|pdf|download statement|statement of account/i.test(t)) {
     const tc = renderToolCard("generate_loan_statement", { email: S.email, nationalId: S.nationalId, name: S.name });
-    await rawWait(300); tc.classList.add("tool-done");
+    tc.classList.add("tool-done");
     return {
       text: `Your official HELB Statement of Account is ready for **${S.name || S.email}**. Click below to view and print the complete ledger:`,
       html: `
@@ -1777,7 +1775,7 @@ async function processHelbMessage(text, g) {
   // Appeal & Re-categorization
   if (/appeal|re-categoriz|wrong band|change band|financial problem|deceased/i.test(t)) {
     const tc = renderToolCard("get_appeal_guidance", { email: S.email, nationalId: S.nationalId, currentBand: S.band });
-    await rawWait(300); tc.classList.add("tool-done");
+    tc.classList.add("tool-done");
     return {
       text: `Here is the official guide to appealing your HEF funding band on **portal.hef.co.ke** for **${S.name || S.email}**:`,
       html: cardAppealGuide(p)
@@ -1787,7 +1785,7 @@ async function processHelbMessage(text, g) {
   // Clearance & Compliance Certificate
   if (/clearance|compliance|certificate|clean record/i.test(t)) {
     const tc = renderToolCard("check_clearance_status", { email: S.email, nationalId: S.nationalId, balance: p.outstandingBalance });
-    await rawWait(300); tc.classList.add("tool-done");
+    tc.classList.add("tool-done");
     return {
       text: `Here is your HELB Clearance & Compliance evaluation for **${S.name || S.email}**:`,
       html: cardClearanceGuide(p)
@@ -1837,7 +1835,6 @@ async function dispatch(text) {
 
   try {
     showTyping("Huduma Smart is interacting with HEF portal…");
-    await rawWait(300);
     if (GEN !== g) return;
 
     let res = await processHelbMessage(text, g);

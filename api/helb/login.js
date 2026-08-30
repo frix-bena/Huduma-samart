@@ -147,6 +147,62 @@ async function directHefLogin(credential, password) {
   });
 }
 
+async function httpGetPortalPage(pageUrl, cookieHeader, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    const options = {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Cookie": cookieHeader,
+        "Referer": "https://portal.hef.co.ke/",
+        "Connection": "keep-alive"
+      },
+      timeout: timeoutMs
+    };
+    const req = https.get(pageUrl, options, (res) => {
+      let body = "";
+      res.on("data", chunk => body += chunk);
+      res.on("end", () => {
+        resolve({ ok: res.statusCode >= 200 && res.statusCode < 400, statusCode: res.statusCode, body, url: pageUrl });
+      });
+    });
+    req.on("error", (e) => resolve({ ok: false, error: e }));
+    req.on("timeout", () => { req.destroy(); resolve({ ok: false, timeout: true }); });
+  });
+}
+
+async function scrapeHefViaDirectHttp(cookieHeader, credential, portalInfo) {
+  let hefEngine = null;
+  try { hefEngine = require("../../server/hefEngine"); } catch (_) {}
+  if (!hefEngine || !hefEngine.extractDataFromHtml) return {};
+
+  const subPages = [
+    `${PORTAL_BASE_URL}/${portalInfo || ""}`,
+    `${PORTAL_BASE_URL}/account/index/frm_profile`,
+    `${PORTAL_BASE_URL}/service/index/frm_loans`,
+    `${PORTAL_BASE_URL}/nfm/index/frm_update_details`,
+    `${PORTAL_BASE_URL}/service/index/frm_loan_statement`
+  ];
+
+  const results = await Promise.allSettled(
+    subPages.map(url => httpGetPortalPage(url, cookieHeader, 6000))
+  );
+
+  const mergedScraped = {};
+  for (const res of results) {
+    if (res.status === "fulfilled" && res.value && res.value.ok && res.value.body) {
+      const pageData = hefEngine.extractDataFromHtml(res.value.body, res.value.url);
+      for (const [k, v] of Object.entries(pageData)) {
+        if (v !== null && v !== undefined && v !== "" && (mergedScraped[k] === undefined || mergedScraped[k] === null || mergedScraped[k] === "Data not found")) {
+          mergedScraped[k] = v;
+        }
+      }
+    }
+  }
+
+  return mergedScraped;
+}
+
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
@@ -157,7 +213,7 @@ module.exports = async (req, res) => {
   const { email, password } = req.body || {};
   const userIdentifier = (email || req.body?.credential || req.body?.nationalId || "").trim();
 
-  console.log("Attempting login for user:", email || userIdentifier);
+  console.log("Attempting fast login for user:", email || userIdentifier);
 
   if (!userIdentifier || !password) {
     return res.status(400).json({ ok: false, success: false, message: "Email / ID number and password are required." });
@@ -177,20 +233,23 @@ module.exports = async (req, res) => {
 
     const result = await directHefLogin(userIdentifier, password);
 
-    // Build profile strictly using actual provided / scraped fields
-    let profile = null;
-    if (hefEngine && hefEngine.resolveHefProfile) {
-      profile = hefEngine.resolveHefProfile({
-        ...req.body,
-        credential: userIdentifier,
-        email: userIdentifier.includes("@") ? userIdentifier : req.body?.email,
-        nationalId: /^\d{5,10}$/.test(userIdentifier) ? userIdentifier : req.body?.nationalId
-      });
-    }
+    if (result.ok && result.sessionToken) {
+      const scrapedData = await scrapeHefViaDirectHttp(result.sessionToken, userIdentifier, result.portalInfo);
+      
+      let profile = null;
+      if (hefEngine && hefEngine.resolveHefProfile) {
+        profile = hefEngine.resolveHefProfile({
+          ...req.body,
+          ...scrapedData,
+          credential: userIdentifier,
+          email: userIdentifier.includes("@") ? userIdentifier : (scrapedData.email || req.body?.email),
+          nationalId: /^\d{5,10}$/.test(userIdentifier) ? userIdentifier : (scrapedData.nationalId || req.body?.nationalId)
+        });
+      }
 
-    if (result.ok) {
       return res.status(200).json({
         ...result,
+        scrapedData,
         dataIntegrityWarning: profile?.dataIntegrityWarning || false,
         warningDetail: profile?.warningDetail || null,
         profile
