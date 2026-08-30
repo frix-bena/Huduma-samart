@@ -10,4 +10,11 @@ services:
         value: production
       - key: DEBUG_VISIBLE
         value: "false"
+      # Optional residential/Kenyan proxy configuration for HEF portal connectivity
+      # - key: PROXY_SERVER
+      #   value: "http://proxy.example.com:8080"
+      # - key: PROXY_USERNAME
+      #   value: "proxy_username"
+      # - key: PROXY_PASSWORD
+      #   value: "proxy_password"
     plan: starter

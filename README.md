@@ -45,3 +45,6 @@ Users can log into the HEF portal using either:
 ## Environment Variables
 - `PORT` — Port for the Express server (default: `3001`)
 - `DEBUG_VISIBLE` — Set to `true` to run Playwright with a visible browser window for debugging
+- `PROXY_SERVER` — (Optional) Proxy URL (e.g. `http://proxy.example.com:8080`) to route Playwright headless browser and Node HTTP/HTTPS requests through a Kenyan or residential proxy if the hosting provider's IP is throttled/blocked.
+- `PROXY_USERNAME` — (Optional) Username for proxy authentication.
+- `PROXY_PASSWORD` — (Optional) Password for proxy authentication.

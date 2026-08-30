@@ -16,6 +16,7 @@ const crypto = require("crypto");
 const fs = require("fs-extra");
 const { chromium } = require("playwright-extra");
 const stealth = require("puppeteer-extra-plugin-stealth")();
+const { HttpsProxyAgent } = require("https-proxy-agent");
 const hefEngine = require("./hefEngine");
 const human = require("./humanInteraction");
 
@@ -43,6 +44,104 @@ const PORTAL_BASE_URL = "https://portal.hef.co.ke";
 const PORTAL_SIGNIN_URL = "https://portal.hef.co.ke/auth/signin";
 const SCREENSHOTS_DIR = path.join(__dirname, "screenshots");
 fs.ensureDirSync(SCREENSHOTS_DIR);
+
+/**
+ * Helper to retrieve proxy configuration from environment variables.
+ * Reads PROXY_SERVER, PROXY_USERNAME, and PROXY_PASSWORD.
+ */
+function getProxyConfig() {
+  const proxyServer = (process.env.PROXY_SERVER || "").trim();
+  if (!proxyServer) return null;
+
+  const username = process.env.PROXY_USERNAME ? process.env.PROXY_USERNAME.trim() : undefined;
+  const password = process.env.PROXY_PASSWORD ? process.env.PROXY_PASSWORD.trim() : undefined;
+
+  const serverUrl = proxyServer.startsWith("http://") || proxyServer.startsWith("https://") || proxyServer.startsWith("socks5://")
+    ? proxyServer
+    : `http://${proxyServer}`;
+
+  const playwrightProxy = {
+    server: serverUrl,
+  };
+  if (username) playwrightProxy.username = username;
+  if (password) playwrightProxy.password = password;
+
+  let agentUrl = serverUrl;
+  try {
+    const parsed = new URL(serverUrl);
+    if (username && !parsed.username) parsed.username = username;
+    if (password && !parsed.password) parsed.password = password;
+    agentUrl = parsed.toString();
+  } catch (_) {}
+
+  let httpsAgent = null;
+  try {
+    httpsAgent = new HttpsProxyAgent(agentUrl);
+  } catch (err) {
+    console.warn(`[proxy-config] Warning initializing HttpsProxyAgent for ${serverUrl}:`, err.message);
+  }
+
+  return {
+    server: serverUrl,
+    username,
+    password,
+    playwrightProxy,
+    httpsAgent,
+  };
+}
+
+/**
+ * Lightweight upstream health check to PORTAL_BASE_URL using plain Node https.get
+ * outside of Playwright.
+ * @param {number} timeoutMs
+ * @returns {Promise<{ ok: boolean, statusCode?: number, error?: Error, durationMs: number }>}
+ */
+async function checkPortalPlainHttpHealth(timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+    const proxyConfig = getProxyConfig();
+    const options = {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Connection": "close",
+      },
+      timeout: timeoutMs,
+    };
+    if (proxyConfig?.httpsAgent) {
+      options.agent = proxyConfig.httpsAgent;
+    }
+
+    const req = https.get(PORTAL_BASE_URL, options, (res) => {
+      res.resume();
+      const durationMs = Date.now() - startTime;
+      const ok = res.statusCode >= 200 && res.statusCode < 500;
+      resolve({
+        ok,
+        statusCode: res.statusCode,
+        durationMs,
+      });
+    });
+
+    req.on("error", (err) => {
+      resolve({
+        ok: false,
+        error: err,
+        durationMs: Date.now() - startTime,
+      });
+    });
+
+    req.on("timeout", () => {
+      req.destroy();
+      resolve({
+        ok: false,
+        timeout: true,
+        error: new Error(`Health check timed out after ${timeoutMs}ms`),
+        durationMs: Date.now() - startTime,
+      });
+    });
+  });
+}
 
 // In-memory active session store for verified portal sessions
 const ACTIVE_SESSIONS = new Map();
@@ -677,8 +776,12 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
   return new Promise((resolve) => {
     const startTime = Date.now();
     console.log(`[direct-auth] Initiating direct handshake with ${PORTAL_BASE_URL}…`);
+    const proxyConfig = getProxyConfig();
+    if (proxyConfig) {
+      console.log(`[direct-auth] Routing direct request through proxy: ${proxyConfig.server}`);
+    }
 
-    const req1 = https.get(PORTAL_BASE_URL, {
+    const getOptions = {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -686,7 +789,12 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
         "Connection": "keep-alive"
       },
       timeout: timeoutMs
-    }, (res1) => {
+    };
+    if (proxyConfig?.httpsAgent) {
+      getOptions.agent = proxyConfig.httpsAgent;
+    }
+
+    const req1 = https.get(PORTAL_BASE_URL, getOptions, (res1) => {
       const rawCookies = res1.headers["set-cookie"] || [];
       const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
 
@@ -698,7 +806,7 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
         password: password
       });
 
-      const req2 = https.request(PORTAL_SIGNIN_URL, {
+      const reqOptions = {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
@@ -711,7 +819,12 @@ async function directHefLogin(credential, password, timeoutMs = 25000) {
           "Accept": "*/*"
         },
         timeout: timeoutMs
-      }, (res2) => {
+      };
+      if (proxyConfig?.httpsAgent) {
+        reqOptions.agent = proxyConfig.httpsAgent;
+      }
+
+      const req2 = https.request(PORTAL_SIGNIN_URL, reqOptions, (res2) => {
         let body = "";
         res2.on("data", chunk => body += chunk);
         res2.on("end", () => {
@@ -1046,9 +1159,12 @@ async function scrapeHefPortalSession(
 
 async function playwrightHefLogin(email, password) {
   const isDebugVisible = process.env.DEBUG_VISIBLE === "true";
-  console.log(`[playwright-login] Starting human-simulated Playwright browser (visible: ${isDebugVisible}) for user: ${email}…`);
+  const proxyConfig = getProxyConfig();
+  const navTimeout = proxyConfig ? 60000 : 45000;
 
-  const browser = await chromium.launch({
+  console.log(`[playwright-login] Starting human-simulated Playwright browser (visible: ${isDebugVisible}, proxy: ${proxyConfig ? proxyConfig.server : "none"}, navTimeout: ${navTimeout}ms) for user: ${email}…`);
+
+  const launchOptions = {
     headless: !isDebugVisible,
     slowMo: isDebugVisible ? 40 : 0,
     args: [
@@ -1059,7 +1175,13 @@ async function playwrightHefLogin(email, password) {
       "--disable-dev-shm-usage",
       "--window-size=1280,800",
     ],
-  });
+  };
+
+  if (proxyConfig?.playwrightProxy) {
+    launchOptions.proxy = proxyConfig.playwrightProxy;
+  }
+
+  const browser = await chromium.launch(launchOptions);
 
   const ctx = await browser.newContext({
     viewport: { width: 1280, height: 800 },
@@ -1112,27 +1234,66 @@ async function playwrightHefLogin(email, password) {
   let keepBrowserOpen = false;
 
   try {
-    console.log(`[playwright-login] Navigating to ${PORTAL_BASE_URL} with human pacing…`);
+    console.log(`[playwright-login] Navigating to ${PORTAL_BASE_URL} with human pacing (timeout: ${navTimeout}ms)…`);
 
     let navOk = false;
+    const navErrors = [];
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        await page.goto(PORTAL_BASE_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
+        console.log(`[playwright-login] Navigation attempt ${attempt}/2 to ${PORTAL_BASE_URL}…`);
+        await page.goto(PORTAL_BASE_URL, { waitUntil: "domcontentloaded", timeout: navTimeout });
         navOk = true;
         break;
       } catch (err) {
-        console.warn(`[playwright-login] ⚠️ Navigation attempt ${attempt} warning: ${err.message}`);
+        navErrors.push(err);
+        console.warn(`[playwright-login] ⚠️ Navigation attempt ${attempt} failed: ${err.name || "Error"} - ${err.message}`);
+        console.warn(`[playwright-login] ⚠️ Stack trace:\n${err.stack || "(no stack)"}`);
         if (attempt === 1) await human.humanPause(1500, 3000);
       }
     }
 
     if (!navOk) {
+      console.log("[playwright-login] Both Playwright navigation attempts failed. Performing upstream health check…");
+      const health = await checkPortalPlainHttpHealth(8000);
+      let diagnosticBranch = "plain-http-failed";
+      let failureReason = "plain-http-failed";
+      let failureMessage = "The HELB/HEF portal appears to be unreachable from this server (network-level failure) — try again shortly or check if this server's IP is being blocked.";
+
+      if (health.ok) {
+        diagnosticBranch = "playwright-only-failed";
+        failureReason = "playwright-only-failed";
+        failureMessage = "Portal is reachable via plain HTTP but Playwright navigation is failing — possible bot-protection/anti-automation block";
+        console.warn(`[playwright-login] ⚠️ Upstream health check succeeded (HTTP ${health.statusCode} in ${health.durationMs}ms), but Playwright browser navigation failed.`);
+        console.warn(`[playwright-login] ${failureMessage}`);
+      } else {
+        diagnosticBranch = "plain-http-failed";
+        failureReason = "plain-http-failed";
+        console.warn(`[playwright-login] ❌ Plain HTTP upstream health check also failed (${health.durationMs}ms): ${health.error?.message || `HTTP ${health.statusCode}`}`);
+        console.warn(`[playwright-login] ${failureMessage}`);
+      }
+
       const snap = await captureSnapshot(page, "nav-failed");
       return {
         ok: false,
         success: false,
         network_error: true,
-        message: "The HELB/HEF portal is currently offline or unreachable. Please try again in a few moments.",
+        diagnosticBranch,
+        failureReason,
+        message: failureMessage,
+        diagnostics: {
+          diagnosticBranch,
+          failureReason,
+          navTimeout,
+          attempts: 2,
+          hasProxy: Boolean(proxyConfig),
+          plainHttpHealth: {
+            ok: health.ok,
+            statusCode: health.statusCode || null,
+            durationMs: health.durationMs,
+            error: health.error?.message || null,
+          },
+          errors: navErrors.map(e => ({ name: e.name || "Error", message: e.message, stack: e.stack })),
+        },
         snapshot: snap
       };
     }
@@ -1332,16 +1493,55 @@ async function playwrightHefLogin(email, password) {
     );
 
   } catch (err) {
-    console.error("[playwright-login] ❌ Error:", err.message);
+    console.error(`[playwright-login] ❌ Error: ${err.name || "Error"} - ${err.message}`);
+    console.error(`[playwright-login] ❌ Stack trace:\n${err.stack || "(no stack)"}`);
     const snap = await captureSnapshot(page, "exception");
     const isNet = isNetworkError(err);
+
+    let diagnosticBranch = isNet ? "portal-unreachable" : "automation-error";
+    let failureReason = isNet ? "portal-unreachable" : "automation-error";
+    let failureMessage = isNet
+      ? "The HELB/HEF portal appears to be unreachable from this server (network-level failure) — try again shortly or check if this server's IP is being blocked."
+      : `Automation error: ${err.message}`;
+
+    let plainHealth = null;
+    if (isNet) {
+      const health = await checkPortalPlainHttpHealth(8000).catch(() => ({ ok: false }));
+      plainHealth = health;
+      if (health.ok) {
+        diagnosticBranch = "playwright-only-failed";
+        failureReason = "playwright-only-failed";
+        failureMessage = "Portal is reachable via plain HTTP but Playwright navigation is failing — possible bot-protection/anti-automation block";
+        console.warn(`[playwright-login] ⚠️ Upstream health check succeeded, but Playwright encountered an error.`);
+        console.warn(`[playwright-login] ${failureMessage}`);
+      } else {
+        diagnosticBranch = "plain-http-failed";
+        failureReason = "plain-http-failed";
+        console.warn(`[playwright-login] ❌ Plain HTTP upstream health check also failed.`);
+      }
+    }
+
     return {
       ok: false,
       success: false,
       network_error: isNet,
-      message: isNet
-        ? "The HELB/HEF portal is currently offline or unreachable. Please try again later."
-        : `Automation error: ${err.message}`,
+      diagnosticBranch,
+      failureReason,
+      message: failureMessage,
+      diagnostics: {
+        diagnosticBranch,
+        failureReason,
+        hasProxy: Boolean(proxyConfig),
+        plainHttpHealth: plainHealth ? {
+          ok: plainHealth.ok,
+          statusCode: plainHealth.statusCode || null,
+          durationMs: plainHealth.durationMs,
+          error: plainHealth.error?.message || null,
+        } : null,
+        errorName: err.name || "Error",
+        errorMessage: err.message,
+        errorStack: err.stack,
+      },
       snapshot: snap,
     };
   } finally {
@@ -1388,6 +1588,7 @@ async function helbLogin(email, password) {
  * GET /api/health
  */
 app.get("/api/health", (_, res) => {
+  const proxyConfig = getProxyConfig();
   res.json({
     ok: true,
     service: "Huduma Smart Automation Backend",
@@ -1395,6 +1596,8 @@ app.get("/api/health", (_, res) => {
     portalUrl: PORTAL_BASE_URL,
     timestamp: new Date().toISOString(),
     debugVisible: process.env.DEBUG_VISIBLE === "true",
+    proxyEnabled: Boolean(proxyConfig),
+    proxyServer: proxyConfig ? proxyConfig.server : null,
   });
 });
 
@@ -1511,6 +1714,9 @@ app.post("/api/helb/login", async (req, res) => {
           success: false,
           network_error: true,
           message: result.message || "The HELB/HEF portal is currently offline or unreachable. Please try again later.",
+          diagnosticBranch: result.diagnosticBranch || "portal-unreachable",
+          failureReason: result.failureReason || result.diagnosticBranch || "portal-unreachable",
+          diagnostics: result.diagnostics || null,
           snapshot: result.snapshot || null
         });
       }
@@ -2055,13 +2261,28 @@ app.use((err, req, res, next) => {
 });
 
 // ── Server Start ──
-app.listen(PORT, () => {
-  console.log(`\n===========================================================`);
-  console.log(`🚀 Huduma Smart — HELB / HEF AI Automation Backend`);
-  console.log(`   Web Application:      http://localhost:${PORT}`);
-  console.log(`   API Health Endpoint:  http://localhost:${PORT}/api/health`);
-  console.log(`   Target Portal:        ${PORTAL_BASE_URL}`);
-  console.log(`   Browser Debug Mode:   ${process.env.DEBUG_VISIBLE === "true" ? "VISIBLE" : "Headless"}`);
-  console.log(`   Screenshots Dir:      ${SCREENSHOTS_DIR}`);
-  console.log(`===========================================================\n`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    const proxyConfig = getProxyConfig();
+    console.log(`\n===========================================================`);
+    console.log(`🚀 Huduma Smart — HELB / HEF AI Automation Backend`);
+    console.log(`   Web Application:      http://localhost:${PORT}`);
+    console.log(`   API Health Endpoint:  http://localhost:${PORT}/api/health`);
+    console.log(`   Target Portal:        ${PORTAL_BASE_URL}`);
+    console.log(`   Browser Debug Mode:   ${process.env.DEBUG_VISIBLE === "true" ? "VISIBLE" : "Headless"}`);
+    console.log(`   Proxy Enabled:        ${Boolean(proxyConfig)} ${proxyConfig ? `(${proxyConfig.server})` : ""}`);
+    console.log(`   Screenshots Dir:      ${SCREENSHOTS_DIR}`);
+    console.log(`===========================================================\n`);
+  });
+}
+
+module.exports = {
+  app,
+  getProxyConfig,
+  checkPortalPlainHttpHealth,
+  directHefLogin,
+  playwrightHefLogin,
+  helbLogin,
+  isNetworkError,
+  PORTAL_BASE_URL,
+};
