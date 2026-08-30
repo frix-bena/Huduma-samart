@@ -1059,6 +1059,7 @@ function cardHefPortalDashboard(p) {
   const bandNum = S.band || (b.band || 1);
   const bandCategory = b.category || "Evaluated";
   const bandLabel = `Band ${bandNum} (${bandCategory})`;
+  const hasBand = Boolean(S.band || (p.band && p.band.band));
 
   const studentInitials = (S.name || "Student").split(" ").map(w => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "HS";
 
