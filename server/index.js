@@ -145,11 +145,103 @@ async function checkPortalPlainHttpHealth(timeoutMs = 8000) {
 }
 
 // In-memory active session store for verified portal sessions
+// Key: userIdentifier -> Value: { identifier, sessionToken, scrapedData, profile, page, ctx, browser, cookies, userType, loginTime, lastActive, inactivityTimer }
 const ACTIVE_SESSIONS = new Map();
 
 // In-memory active session store for pending OTP verification sessions
 // Key: otpSessionId -> Value: { otpSessionId, browser, ctx, page, mousePos, capturedProfileData, capturedAllocationData, capturedResponses, email, timer, createdAt }
 const OTP_SESSIONS = new Map();
+
+/**
+ * Clean up and close browser resources for an active session
+ */
+async function cleanupActiveSession(identifier) {
+  const session = ACTIVE_SESSIONS.get(identifier);
+  if (!session) return;
+  ACTIVE_SESSIONS.delete(identifier);
+  if (session.inactivityTimer) clearTimeout(session.inactivityTimer);
+  try {
+    if (session.page && !session.page.isClosed()) await session.page.close().catch(() => {});
+    if (session.ctx) await session.ctx.close().catch(() => {});
+    console.log(`[active-session] Cleaned up browser session for "${identifier}"`);
+  } catch (err) {
+    console.warn(`[active-session] Error cleaning up session for "${identifier}":`, err.message);
+  }
+}
+
+/**
+ * Get or create an active Playwright page for an authenticated session.
+ * Reuses the existing authenticated context/page rather than opening a fresh unauthenticated browser.
+ */
+async function getOrCreateSessionPage(userIdentifier) {
+  if (!userIdentifier) {
+    return { ok: false, error: "User credential or session identifier is required." };
+  }
+
+  const session = ACTIVE_SESSIONS.get(userIdentifier);
+  if (!session) {
+    return { ok: false, error: "No active authenticated session found for this user. Please log in first." };
+  }
+
+  // Reset inactivity timeout (15 mins)
+  if (session.inactivityTimer) clearTimeout(session.inactivityTimer);
+  session.inactivityTimer = setTimeout(() => {
+    console.log(`[active-session] Session for "${userIdentifier}" timed out after 15 minutes of inactivity.`);
+    cleanupActiveSession(userIdentifier);
+  }, 15 * 60 * 1000);
+
+  // If page is already open and valid, return it
+  if (session.page && !session.page.isClosed()) {
+    session.lastActive = Date.now();
+    return { ok: true, page: session.page, ctx: session.ctx, session };
+  }
+
+  // If page was closed or session established via direct HTTP, spawn an authenticated context from cookies
+  try {
+    const browser = await getSharedBrowser();
+    const ctx = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      locale: "en-KE",
+      timezoneId: "Africa/Nairobi",
+      extraHTTPHeaders: { "Accept-Language": "en-KE,en;q=0.9,en-US;q=0.8" },
+      ignoreHTTPSErrors: true,
+      bypassCSP: true,
+    });
+
+    if (session.cookies && Array.isArray(session.cookies) && session.cookies.length > 0) {
+      await ctx.addCookies(session.cookies).catch(() => {});
+    } else if (session.sessionToken) {
+      const cookieList = session.sessionToken.split(";").map(c => {
+        const parts = c.trim().split("=");
+        if (parts.length >= 2) {
+          return {
+            name: parts[0].trim(),
+            value: parts.slice(1).join("=").trim(),
+            domain: "portal.hef.co.ke",
+            path: "/"
+          };
+        }
+        return null;
+      }).filter(Boolean);
+      if (cookieList.length > 0) {
+        await ctx.addCookies(cookieList).catch(() => {});
+      }
+    }
+
+    const page = await ctx.newPage();
+    await human.setupHumanStealth(page);
+
+    session.ctx = ctx;
+    session.page = page;
+    session.browser = browser;
+    session.lastActive = Date.now();
+
+    return { ok: true, page, ctx, session };
+  } catch (err) {
+    return { ok: false, error: `Failed to initialize authenticated session browser: ${err.message}` };
+  }
+}
 
 /**
  * Clean up and close browser resources for an OTP session
@@ -1568,7 +1660,7 @@ async function playwrightHefLogin(email, password) {
       };
     }
 
-    return await scrapeHefPortalSession(
+    const scrapeResult = await scrapeHefPortalSession(
       page,
       ctx,
       email,
@@ -1577,6 +1669,16 @@ async function playwrightHefLogin(email, password) {
       capturedResponses,
       mousePos
     );
+
+    if (scrapeResult && scrapeResult.ok) {
+      keepBrowserOpen = true;
+      scrapeResult.page = page;
+      scrapeResult.ctx = ctx;
+      scrapeResult.browser = browser;
+      scrapeResult.cookies = await ctx.cookies().catch(() => []);
+    }
+
+    return scrapeResult;
 
   } catch (err) {
     console.error(`[playwright-login] ❌ Error: ${err.name || "Error"} - ${err.message}`);
@@ -1595,6 +1697,125 @@ async function playwrightHefLogin(email, password) {
     if (!keepBrowserOpen) {
       await ctx.close().catch(() => {});
     }
+  }
+}
+
+/**
+ * Employer Portal Authentication via Playwright
+ * Targets employer-specific routes and fields on portal.hef.co.ke
+ */
+async function playwrightEmployerLogin(credential, password) {
+  const browser = await getSharedBrowser();
+  const ctx = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    locale: "en-KE",
+    timezoneId: "Africa/Nairobi",
+    extraHTTPHeaders: { "Accept-Language": "en-KE,en;q=0.9,en-US;q=0.8" },
+    ignoreHTTPSErrors: true,
+    bypassCSP: true,
+  });
+
+  const page = await ctx.newPage();
+  await human.setupHumanStealth(page);
+
+  try {
+    const employerUrls = [
+      "https://portal.hef.co.ke/auth/employer_signin",
+      "https://portal.hef.co.ke/employer/index/frm_login",
+      "https://portal.hef.co.ke/auth/signin"
+    ];
+
+    let navOk = false;
+    for (const u of employerUrls) {
+      try {
+        const resp = await page.goto(u, { waitUntil: "domcontentloaded", timeout: 20000 });
+        if (resp && resp.status() < 400) {
+          navOk = true;
+          break;
+        }
+      } catch (_) {}
+    }
+
+    if (!navOk) {
+      const snap = await captureSnapshot(page, "employer-login-nav-failed");
+      await ctx.close().catch(() => {});
+      return { ok: false, error: "Failed to navigate to employer login page on portal.hef.co.ke.", snapshot: snap };
+    }
+
+    // Check for Employer tab/radio
+    const employerTab = page.locator('a[href*="employer"], input[value="employer"], button:has-text("Employer"), #tab_employer').first();
+    if (await employerTab.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await employerTab.click().catch(() => {});
+    }
+
+    const userInput = page.locator('input#employer_pin, input#email_add, input[name="email_add"], input[name="user_number"], input#user_id, input[name="email"]').first();
+    await userInput.waitFor({ state: "visible", timeout: 15000 });
+    await userInput.fill(credential);
+
+    const passInput = page.locator('input#form-password, input[name="password"], input[type="password"]').first();
+    await passInput.waitFor({ state: "visible", timeout: 15000 });
+    await passInput.fill(password);
+
+    const submitBtn = page.locator('.btn-signin, button[type="submit"], button:has-text("Login"), #form-login button').first();
+    await submitBtn.click();
+    await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(2000);
+
+    // Check error message
+    const errorEl = page.locator('.alert-danger, .error-message, .invalid-feedback, #error-msg, .text-danger').first();
+    if (await errorEl.isVisible({ timeout: 1000 }).catch(() => false)) {
+      const errText = await errorEl.innerText().catch(() => "");
+      const cleanErr = errText.replace("Processing please wait..!", "").trim();
+      if (cleanErr && cleanErr.length > 2 && !hefEngine.isBoilerplateText(cleanErr)) {
+        const snap = await captureSnapshot(page, "employer-login-err");
+        await ctx.close().catch(() => {});
+        return { ok: false, error: cleanErr, snapshot: snap };
+      }
+    }
+
+    const cookies = await ctx.cookies();
+    const sessionCookie = cookies.find(c => c.name.toLowerCase().includes("session") || c.name.toLowerCase().includes("token"));
+
+    // Scrape employer dashboard details from DOM
+    const bodyText = await page.locator("body").innerText().catch(() => "");
+    const employerData = {
+      credential,
+      employerName: null,
+      kraPin: null,
+      employerCode: null,
+      activeLoaneesCount: 0,
+      totalRemitted: "KES 0"
+    };
+
+    const nameMatch = bodyText.match(/(?:Employer\s*Name|Company\s*Name|Organization)\s*[:#-]?\s*([A-Za-z0-9\s.,&-]{3,50})/i);
+    if (nameMatch && nameMatch[1] && !hefEngine.isBoilerplateText(nameMatch[1])) {
+      employerData.employerName = nameMatch[1].trim();
+    }
+
+    const kraMatch = bodyText.match(/(?:KRA\s*PIN|PIN\s*No\.?)\s*[:#-]?\s*([A-Z0-9]{11})/i);
+    if (kraMatch && kraMatch[1]) {
+      employerData.kraPin = kraMatch[1].trim();
+    }
+
+    return {
+      ok: true,
+      success: true,
+      userType: "employer",
+      sessionToken: sessionCookie?.value || `hef-emp-${Date.now().toString(36)}`,
+      employerData,
+      page,
+      ctx,
+      browser,
+      cookies,
+      sourceUrl: page.url(),
+      section: "Employer Portal Dashboard"
+    };
+  } catch (err) {
+    console.error("[employer-login] Exception:", err);
+    const snap = await captureSnapshot(page, "employer-login-exception");
+    await ctx.close().catch(() => {});
+    return { ok: false, error: `Employer login error: ${err.message}`, snapshot: snap };
   }
 }
 
@@ -1792,14 +2013,19 @@ app.post("/api/helb/login", async (req, res) => {
     result.dataIntegrityWarning = profile.dataIntegrityWarning !== undefined ? profile.dataIntegrityWarning : (result.dataIntegrityWarning || false);
     result.warningDetail = profile.warningDetail || result.warningDetail || null;
 
-    // Store verified session
+    // Store verified session with active Playwright context/page
     const sessionToken = result.sessionToken || `hef-sess-${Date.now().toString(36)}`;
     ACTIVE_SESSIONS.set(userIdentifier, {
       identifier: userIdentifier,
       sessionToken,
       scrapedData: result.scrapedData || {},
       profile,
+      page: result.page || null,
+      ctx: result.ctx || null,
+      browser: result.browser || null,
+      cookies: result.cookies || [],
       loginTime: Date.now(),
+      lastActive: Date.now(),
     });
 
     return res.status(200).json(result);
@@ -1998,10 +2224,8 @@ app.post("/api/helb/otp", async (req, res) => {
       mousePos
     );
 
-    // 7. Cleanup browser resources now that scraping has finished
-    await cleanupOtpSession(sessionId);
-
     if (!scrapeResult.ok) {
+      await cleanupOtpSession(sessionId);
       return res.status(500).json({
         ok: false,
         success: false,
@@ -2009,7 +2233,7 @@ app.post("/api/helb/otp", async (req, res) => {
       });
     }
 
-    // 8. Construct profile and save active session
+    // 7. Construct profile and save active session with preserved page/ctx
     const userIdentifier = (email || req.body?.credential || req.body?.nationalId || "").trim();
     const profile = buildResponseProfile(scrapeResult.scrapedData, req.body, userIdentifier);
     scrapeResult.profile = profile;
@@ -2023,9 +2247,17 @@ app.post("/api/helb/otp", async (req, res) => {
         sessionToken: verifiedSessionToken,
         scrapedData: scrapeResult.scrapedData || {},
         profile,
+        page,
+        ctx,
+        browser,
+        cookies: await ctx.cookies().catch(() => []),
         loginTime: Date.now(),
+        lastActive: Date.now(),
       });
     }
+
+    if (session.timer) clearTimeout(session.timer);
+    OTP_SESSIONS.delete(sessionId);
 
     return res.status(200).json(scrapeResult);
 
@@ -2049,6 +2281,8 @@ app.post("/api/helb/profile", (req, res) => {
     ok: true,
     success: true,
     profile,
+    sourceUrl: "https://portal.hef.co.ke/account/index/frm_profile",
+    section: "Student Profile",
     message: "HEF portal profile retrieved successfully."
   });
 });
@@ -2059,6 +2293,8 @@ app.get("/api/helb/profile", (req, res) => {
     ok: true,
     success: true,
     profile,
+    sourceUrl: "https://portal.hef.co.ke/account/index/frm_profile",
+    section: "Student Profile",
     message: "HEF portal profile retrieved successfully."
   });
 });
@@ -2092,128 +2328,510 @@ app.post("/api/helb/balance", (req, res) => {
     annualHouseholdFee: funding.annual.householdFee,
     percentages: funding.percentages,
     status: "Active",
+    sourceUrl: "https://portal.hef.co.ke/service/index/frm_loans",
+    section: "Loan Balance Overview",
     message: `Loan balance retrieved successfully for ${student.name}.`
   });
 });
 
 /**
- * POST /api/helb/disb
+ * 1. LOAN & SCHOLARSHIP APPLICATIONS
+ * POST /api/helb/apply-loan and POST /api/helb/apply
  */
-app.post("/api/helb/disb", (req, res) => {
-  const profile = getRequestProfile(req);
-  res.json({
-    ok: true,
-    success: true,
-    student: profile.student.name,
-    nationalId: profile.student.nationalId,
-    institution: profile.student.institution,
-    band: profile.funding.bandName,
-    disb: profile.disbursements,
-    fullSchedule: profile.disbursements,
-    message: `Disbursement schedule retrieved for ${profile.student.name}.`
-  });
+app.post(["/api/helb/apply-loan", "/api/helb/apply"], async (req, res) => {
+  const body = req.body || {};
+  const userIdentifier = (body.credential || body.email || body.nationalId || body.user || "").trim();
+  const sessionRes = await getOrCreateSessionPage(userIdentifier);
+
+  if (!sessionRes.ok) {
+    return res.status(401).json({
+      ok: false,
+      success: false,
+      message: sessionRes.error || "No active authenticated session found. Please log in first."
+    });
+  }
+
+  const { page } = sessionRes;
+  const applicationType = body.applicationType || body.type || "undergraduate";
+  const formData = body.formData || body;
+
+  try {
+    const result = await hefEngine.submitLoanApplication(page, applicationType, formData);
+    if (!result.ok) {
+      const snap = await captureSnapshot(page, "apply-loan-error");
+      return res.status(400).json({
+        ok: false,
+        success: false,
+        error: result.error,
+        message: result.error,
+        snapshot: snap
+      });
+    }
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error("[api/helb/apply-loan] Error:", err);
+    const snap = await captureSnapshot(page, "apply-loan-exception");
+    return res.status(500).json({
+      ok: false,
+      success: false,
+      error: err.message,
+      message: `Application submission failed: ${err.message}`,
+      snapshot: snap
+    });
+  }
 });
 
 /**
- * POST /api/helb/app-status
+ * 2. STATUS TRACKING
+ * GET /api/helb/application-status and POST /api/helb/app-status
  */
-app.post("/api/helb/app-status", (req, res) => {
-  const profile = getRequestProfile(req);
-  const { appStatus, student, funding } = profile;
+const handleApplicationStatus = async (req, res) => {
+  const userIdentifier = (req.query?.credential || req.query?.email || req.query?.nationalId || req.body?.credential || req.body?.email || req.body?.nationalId || "").trim();
+  const sessionRes = await getOrCreateSessionPage(userIdentifier);
 
-  res.json({
-    ok: true,
-    success: true,
-    student: student.name,
-    nationalId: student.nationalId,
-    institution: student.institution,
-    programme: student.programme,
-    appStatus: appStatus.status,
-    stage: appStatus.stage,
-    batch: appStatus.applicationRef,
-    bandAllocated: appStatus.bandAllocated,
-    bandCategory: appStatus.bandCategory,
-    mtiScore: appStatus.mtiScore,
-    dateSubmitted: appStatus.dateSubmitted,
-    dateApproved: appStatus.dateApproved,
-    appealEligible: appStatus.appealEligible,
-    appealStatus: appStatus.appealStatus,
-    fundingSummary: {
-      scholarship: funding.annual.scholarship,
-      tuitionLoan: funding.annual.tuitionLoan,
-      upkeepLoan: funding.annual.upkeepLoan,
-      householdFee: funding.annual.householdFee
-    },
-    message: "Application status retrieved successfully."
-  });
+  if (!sessionRes.ok) {
+    // If browser not currently running, check stored profile
+    const profile = getRequestProfile(req);
+    if (profile && profile.appStatus && profile.appStatus.status !== "Data not found") {
+      return res.json({
+        ok: true,
+        success: true,
+        status: profile.appStatus.status,
+        stage: profile.appStatus.stage,
+        applicationRef: profile.appStatus.applicationRef,
+        dateSubmitted: profile.appStatus.dateSubmitted,
+        applications: [],
+        sourceUrl: "https://portal.hef.co.ke/service/index/frm_loan_status",
+        section: "My Applications / Status Tracking"
+      });
+    }
+    return res.status(401).json({
+      ok: false,
+      success: false,
+      message: sessionRes.error || "No active authenticated session found. Please log in first."
+    });
+  }
+
+  const { page } = sessionRes;
+  try {
+    const result = await hefEngine.getApplicationStatus(page);
+    if (!result.ok) {
+      const snap = await captureSnapshot(page, "app-status-error");
+      return res.status(404).json({
+        ok: false,
+        success: false,
+        error: result.error,
+        message: result.error,
+        snapshot: snap
+      });
+    }
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error("[api/helb/application-status] Error:", err);
+    const snap = await captureSnapshot(page, "app-status-exception");
+    return res.status(500).json({
+      ok: false,
+      success: false,
+      error: err.message,
+      message: `Failed to retrieve application status: ${err.message}`,
+      snapshot: snap
+    });
+  }
+};
+
+app.get("/api/helb/application-status", handleApplicationStatus);
+app.post("/api/helb/app-status", handleApplicationStatus);
+
+/**
+ * 3. ALLOCATION & DISBURSEMENTS
+ * POST /api/helb/disb and GET /api/helb/disbursements
+ */
+const handleDisbursements = async (req, res) => {
+  const userIdentifier = (req.query?.credential || req.query?.email || req.query?.nationalId || req.body?.credential || req.body?.email || req.body?.nationalId || "").trim();
+  const sessionRes = await getOrCreateSessionPage(userIdentifier);
+
+  if (!sessionRes.ok) {
+    const profile = getRequestProfile(req);
+    if (profile && profile.disbursements) {
+      return res.json({
+        ok: true,
+        success: true,
+        disbursements: profile.disbursements,
+        allocation: profile.funding,
+        sourceUrl: "https://portal.hef.co.ke/service/index/frm_loans",
+        section: "My Loans & Disbursement Schedule",
+        message: `Disbursement schedule retrieved for ${profile.student.name}.`
+      });
+    }
+    return res.status(401).json({
+      ok: false,
+      success: false,
+      message: sessionRes.error || "No active authenticated session found. Please log in first."
+    });
+  }
+
+  const { page } = sessionRes;
+  try {
+    const result = await hefEngine.getDisbursements(page);
+    if (!result.ok) {
+      const snap = await captureSnapshot(page, "disb-error");
+      return res.status(404).json({
+        ok: false,
+        success: false,
+        error: result.error,
+        message: result.error,
+        snapshot: snap
+      });
+    }
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error("[api/helb/disb] Error:", err);
+    const snap = await captureSnapshot(page, "disb-exception");
+    return res.status(500).json({
+      ok: false,
+      success: false,
+      error: err.message,
+      message: `Failed to retrieve disbursement records: ${err.message}`,
+      snapshot: snap
+    });
+  }
+};
+
+app.post("/api/helb/disb", handleDisbursements);
+app.get("/api/helb/disbursements", handleDisbursements);
+
+/**
+ * 4. SELF-SERVE LOAN REPAYMENT (E-Citizen / M-PESA STK / Bank Deposit)
+ * POST /api/helb/repay and POST /api/helb/repayment
+ */
+app.post(["/api/helb/repay", "/api/helb/repayment"], async (req, res) => {
+  const body = req.body || {};
+  const userIdentifier = (body.credential || body.email || body.nationalId || body.user || "").trim();
+  const sessionRes = await getOrCreateSessionPage(userIdentifier);
+
+  if (!sessionRes.ok) {
+    return res.status(401).json({
+      ok: false,
+      success: false,
+      message: sessionRes.error || "No active authenticated session found. Please log in first."
+    });
+  }
+
+  const { page } = sessionRes;
+  const amount = body.amount;
+  const method = body.method || "mpesa_stk";
+
+  try {
+    const result = await hefEngine.initiateRepayment(page, amount, method, body);
+    if (!result.ok) {
+      const snap = await captureSnapshot(page, "repay-error");
+      return res.status(400).json({
+        ok: false,
+        success: false,
+        error: result.error,
+        message: result.error,
+        requiresOtp: result.requiresOtp || false,
+        snapshot: snap
+      });
+    }
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error("[api/helb/repay] Error:", err);
+    const snap = await captureSnapshot(page, "repay-exception");
+    return res.status(500).json({
+      ok: false,
+      success: false,
+      error: err.message,
+      message: `Repayment initiation failed: ${err.message}`,
+      snapshot: snap
+    });
+  }
 });
 
 /**
- * POST /api/helb/repayment
+ * 5. STATEMENT AND RECEIPT MANAGEMENT
+ * GET /api/helb/statement and POST /api/helb/statement
  */
-app.post("/api/helb/repayment", (req, res) => {
-  const profile = getRequestProfile(req);
-  const { funding, student } = profile;
+const handleStatement = async (req, res) => {
+  const userIdentifier = (req.query?.credential || req.query?.email || req.query?.nationalId || req.body?.credential || req.body?.email || req.body?.nationalId || "").trim();
+  const sessionRes = await getOrCreateSessionPage(userIdentifier);
 
-  res.json({
-    ok: true,
-    success: true,
-    student: student.name,
-    nationalId: student.nationalId,
-    repaid: funding.cumulative.repaid,
-    out: funding.cumulative.outstandingBalance,
-    awarded: funding.cumulative.awardedPrincipal,
-    lastPaymentDate: funding.cumulative.repaid > 0 ? "2024-08-10" : "None",
-    lastPaymentAmount: funding.cumulative.repaid > 0 ? funding.cumulative.repaid : 0,
-    paymentMethod: `M-Pesa Paybill 200800 (Account: ${student.nationalId})`,
-    paybill: "200800",
-    accountNumber: student.nationalId,
-    interestRate: "4% p.a. (Undergraduate)",
-    message: "Repayment data retrieved successfully."
-  });
+  if (!sessionRes.ok) {
+    const profile = getRequestProfile(req);
+    if (profile && profile.statement) {
+      return res.json({
+        ok: true,
+        success: true,
+        student: profile.student.name,
+        nationalId: profile.student.nationalId,
+        institution: profile.student.institution,
+        programme: profile.student.programme,
+        band: profile.funding.bandName,
+        openingBalance: profile.statement.openingBalance || 0,
+        closingBalance: profile.statement.closingBalance || profile.funding?.cumulative?.outstandingBalance || 0,
+        statementDate: profile.statement.statementDate || new Date().toISOString().split("T")[0],
+        ledger: profile.statement.ledger || [],
+        pdfUrl: "https://portal.hef.co.ke/service/index/frm_loan_statement",
+        sourceUrl: "https://portal.hef.co.ke/service/index/frm_loan_statement",
+        section: "Official Statement of Loan Account",
+        message: "Official HELB statement ledger generated successfully."
+      });
+    }
+    return res.status(401).json({
+      ok: false,
+      success: false,
+      message: sessionRes.error || "No active authenticated session found. Please log in first."
+    });
+  }
+
+  const { page } = sessionRes;
+  try {
+    const result = await hefEngine.getLoanStatement(page);
+    if (!result.ok) {
+      const snap = await captureSnapshot(page, "statement-error");
+      return res.status(404).json({
+        ok: false,
+        success: false,
+        error: result.error,
+        message: result.error,
+        snapshot: snap
+      });
+    }
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error("[api/helb/statement] Error:", err);
+    const snap = await captureSnapshot(page, "statement-exception");
+    return res.status(500).json({
+      ok: false,
+      success: false,
+      error: err.message,
+      message: `Failed to retrieve loan statement: ${err.message}`,
+      snapshot: snap
+    });
+  }
+};
+
+app.get("/api/helb/statement", handleStatement);
+app.post("/api/helb/statement", handleStatement);
+
+/**
+ * POST /api/helb/receipt
+ */
+app.post("/api/helb/receipt", async (req, res) => {
+  const body = req.body || {};
+  const userIdentifier = (body.credential || body.email || body.nationalId || body.user || "").trim();
+  const sessionRes = await getOrCreateSessionPage(userIdentifier);
+
+  if (!sessionRes.ok) {
+    return res.status(401).json({
+      ok: false,
+      success: false,
+      message: sessionRes.error || "No active authenticated session found. Please log in first."
+    });
+  }
+
+  const { page } = sessionRes;
+  const transactionId = body.transactionId || body.ref || req.query?.transactionId;
+
+  try {
+    const result = await hefEngine.getReceipt(page, transactionId);
+    if (!result.ok) {
+      const snap = await captureSnapshot(page, "receipt-error");
+      return res.status(404).json({
+        ok: false,
+        success: false,
+        error: result.error,
+        message: result.error,
+        snapshot: snap
+      });
+    }
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error("[api/helb/receipt] Error:", err);
+    const snap = await captureSnapshot(page, "receipt-exception");
+    return res.status(500).json({
+      ok: false,
+      success: false,
+      error: err.message,
+      message: `Failed to retrieve receipt: ${err.message}`,
+      snapshot: snap
+    });
+  }
 });
 
 /**
- * POST /api/helb/statement
+ * 6. EMPLOYER REMITTANCES
  */
-app.post("/api/helb/statement", (req, res) => {
-  const profile = getRequestProfile(req);
-  const { statement, student, funding } = profile;
+app.post("/api/helb/employer/login", async (req, res) => {
+  const { credential, password } = req.body || {};
+  if (!credential || !password) {
+    return res.status(400).json({
+      ok: false,
+      success: false,
+      message: "Please provide your Employer PIN / Email and password."
+    });
+  }
 
-  res.json({
-    ok: true,
-    success: true,
-    student: student.name,
-    nationalId: student.nationalId,
-    kcseIndex: student.kcseIndex,
-    institution: student.institution,
-    programme: student.programme,
-    band: funding.bandName,
-    openingBalance: statement.openingBalance,
-    closingBalance: statement.closingBalance,
-    statementDate: statement.statementDate,
-    ledger: statement.ledger,
-    pdfUrl: "https://portal.hef.co.ke/",
-    message: "Official HELB statement ledger generated successfully."
-  });
+  try {
+    const result = await playwrightEmployerLogin(credential.trim(), password);
+    if (!result.ok) {
+      return res.status(401).json({
+        ok: false,
+        success: false,
+        message: result.error || "Invalid employer login credentials for HEF portal.",
+        snapshot: result.snapshot || null
+      });
+    }
+
+    const employerIdentifier = `employer_${credential.trim()}`;
+    ACTIVE_SESSIONS.set(employerIdentifier, {
+      identifier: employerIdentifier,
+      sessionToken: result.sessionToken,
+      employerData: result.employerData,
+      userType: "employer",
+      page: result.page,
+      ctx: result.ctx,
+      browser: result.browser,
+      cookies: result.cookies,
+      loginTime: Date.now(),
+      lastActive: Date.now()
+    });
+
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error("[api/helb/employer/login] Error:", err);
+    return res.status(500).json({
+      ok: false,
+      success: false,
+      message: `Employer authentication failed: ${err.message}`
+    });
+  }
 });
 
-/**
- * POST /api/helb/apply
- */
-app.post("/api/helb/apply", (req, res) => {
-  const profile = getRequestProfile(req);
-  res.json({
-    ok: true,
-    success: true,
-    ref: `HEF-APP-${Date.now().toString().slice(-6)}`,
-    student: profile.student.name,
-    nationalId: profile.student.nationalId,
-    institution: profile.student.institution,
-    academicYear: profile.student.academicYear,
-    message: "Loan and scholarship application sequence initialized."
-  });
+app.post("/api/helb/employer/upload-remittance", async (req, res) => {
+  const body = req.body || {};
+  const userIdentifier = (body.employerPin || body.credential || body.email || "").trim();
+  const employerId = userIdentifier.startsWith("employer_") ? userIdentifier : `employer_${userIdentifier}`;
+  const sessionRes = await getOrCreateSessionPage(employerId);
+
+  if (!sessionRes.ok) {
+    return res.status(401).json({
+      ok: false,
+      success: false,
+      message: sessionRes.error || "No active authenticated employer session found. Please log in first."
+    });
+  }
+
+  const { page } = sessionRes;
+  try {
+    const result = await hefEngine.uploadRemittanceSchedule(page, body);
+    if (!result.ok) {
+      const snap = await captureSnapshot(page, "employer-upload-error");
+      return res.status(400).json({
+        ok: false,
+        success: false,
+        error: result.error,
+        message: result.error,
+        snapshot: snap
+      });
+    }
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error("[api/helb/employer/upload-remittance] Error:", err);
+    const snap = await captureSnapshot(page, "employer-upload-exception");
+    return res.status(500).json({
+      ok: false,
+      success: false,
+      error: err.message,
+      message: `Remittance upload failed: ${err.message}`,
+      snapshot: snap
+    });
+  }
 });
+
+app.post("/api/helb/employer/bulk-checkoff", async (req, res) => {
+  const body = req.body || {};
+  const userIdentifier = (body.employerPin || body.credential || body.email || "").trim();
+  const employerId = userIdentifier.startsWith("employer_") ? userIdentifier : `employer_${userIdentifier}`;
+  const sessionRes = await getOrCreateSessionPage(employerId);
+
+  if (!sessionRes.ok) {
+    return res.status(401).json({
+      ok: false,
+      success: false,
+      message: sessionRes.error || "No active authenticated employer session found. Please log in first."
+    });
+  }
+
+  const { page } = sessionRes;
+  try {
+    const result = await hefEngine.submitBulkCheckoff(page, body);
+    if (!result.ok) {
+      const snap = await captureSnapshot(page, "employer-checkoff-error");
+      return res.status(400).json({
+        ok: false,
+        success: false,
+        error: result.error,
+        message: result.error,
+        snapshot: snap
+      });
+    }
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error("[api/helb/employer/bulk-checkoff] Error:", err);
+    const snap = await captureSnapshot(page, "employer-checkoff-exception");
+    return res.status(500).json({
+      ok: false,
+      success: false,
+      error: err.message,
+      message: `Bulk checkoff failed: ${err.message}`,
+      snapshot: snap
+    });
+  }
+});
+
+const handleRemittanceRecords = async (req, res) => {
+  const userIdentifier = (req.query?.employerPin || req.query?.credential || req.body?.employerPin || req.body?.credential || "").trim();
+  const employerId = userIdentifier.startsWith("employer_") ? userIdentifier : `employer_${userIdentifier}`;
+  const sessionRes = await getOrCreateSessionPage(employerId);
+
+  if (!sessionRes.ok) {
+    return res.status(401).json({
+      ok: false,
+      success: false,
+      message: sessionRes.error || "No active authenticated employer session found. Please log in first."
+    });
+  }
+
+  const { page } = sessionRes;
+  try {
+    const result = await hefEngine.getRemittanceRecords(page);
+    if (!result.ok) {
+      const snap = await captureSnapshot(page, "employer-records-error");
+      return res.status(404).json({
+        ok: false,
+        success: false,
+        error: result.error,
+        message: result.error,
+        snapshot: snap
+      });
+    }
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error("[api/helb/employer/remittance-records] Error:", err);
+    const snap = await captureSnapshot(page, "employer-records-exception");
+    return res.status(500).json({
+      ok: false,
+      success: false,
+      error: err.message,
+      message: `Failed to retrieve remittance records: ${err.message}`,
+      snapshot: snap
+    });
+  }
+};
+
+app.get("/api/helb/employer/remittance-records", handleRemittanceRecords);
+app.post("/api/helb/employer/remittance-records", handleRemittanceRecords);
 
 /**
  * POST /api/helb/clearance
@@ -2232,6 +2850,8 @@ app.post("/api/helb/clearance", (req, res) => {
     balance: funding.cumulative.outstandingBalance,
     reason: clearance.reason,
     verificationCode: clearance.eligible ? `HELB-CLR-${student.nationalId}-${Date.now().toString().slice(-4)}` : null,
+    sourceUrl: "https://portal.hef.co.ke/service/index/frm_clr_cert",
+    section: "Clearance & Compliance",
     message: clearance.eligible ? "Eligible for HELB Clearance Certificate." : "Active balance outstanding."
   });
 });
@@ -2261,6 +2881,8 @@ app.post("/api/helb/appeal", (req, res) => {
       "Sworn Affidavit of economic status from Commissioner of Oaths",
       "Salary slips / termination letter / bank statement of breadwinner"
     ],
+    sourceUrl: "https://portal.hef.co.ke/service/index/frm_appeal",
+    section: "Band Appeal / Re-categorization",
     message: `Appeal lodged to re-categorize from ${profile.funding.bandName} to Band ${requestedBand}.`
   });
 });
@@ -2275,6 +2897,8 @@ app.post("/api/helb/update-info", (req, res) => {
     success: true,
     student: profile.student.name,
     updatedFields: Object.keys(req.body).filter(k => k !== "sessionToken" && k !== "credential"),
+    sourceUrl: "https://portal.hef.co.ke/nfm/index/frm_update_details",
+    section: "Update Loanee Details",
     message: "HEF account information update request received and verified."
   });
 });
@@ -2336,13 +2960,20 @@ if (require.main === module) {
 
 module.exports = {
   app,
+  getSharedBrowser,
   getProxyConfig,
   checkPortalPlainHttpHealth,
   directHefLogin,
   httpGetPortalPage,
   scrapeHefViaDirectHttp,
   playwrightHefLogin,
+  playwrightEmployerLogin,
   helbLogin,
   isNetworkError,
+  captureSnapshot,
+  getOrCreateSessionPage,
+  cleanupActiveSession,
+  ACTIVE_SESSIONS,
+  OTP_SESSIONS,
   PORTAL_BASE_URL,
 };

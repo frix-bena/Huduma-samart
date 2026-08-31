@@ -7,7 +7,7 @@
     "start": "node index.js",
     "dev": "node --watch index.js",
     "debug": "DEBUG_VISIBLE=true node index.js",
-    "test": "node test/scraper.test.js && node test/otp.test.js && node test/network_diagnostics.test.js",
+    "test": "node test/scraper.test.js && node test/otp.test.js && node test/network_diagnostics.test.js && node test/automation_suite.test.js",
     "install-browsers": "npx playwright install chromium"
   },
   "dependencies": {
