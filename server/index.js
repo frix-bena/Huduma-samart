@@ -1669,7 +1669,7 @@ function buildResponseProfile(scraped = {}, reqBody = {}, userIdentifier = "") {
 
   const nationalId = s.nationalId || reqBody.nationalId || (isId ? userIdentifier : null) || "";
   const email = (isEmail ? userIdentifier : reqBody.email) || null;
-  const name = s.name || reqBody.name || (email ? hefEngine.extractNameFromEmail(email) : null) || (nationalId ? `Student (${nationalId})` : "Student");
+  const name = s.name || reqBody.name || null;
   const institution = s.institution || reqBody.institution || "Data not found";
   const programme = s.programme || reqBody.programme || "Data not found";
   const level = s.level || reqBody.level || (programme !== "Data not found" && programme.toLowerCase().includes("diploma") ? "TVET" : "Undergraduate");

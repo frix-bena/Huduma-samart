@@ -332,9 +332,6 @@ function resolveHefProfile(input = {}) {
     name = rawName;
   } else if (input.credential && !input.credential.includes("@") && isNaN(input.credential) && input.credential.length > 2 && !isBoilerplateText(input.credential)) {
     name = input.credential.trim();
-  } else if (input.email && input.email.includes("@")) {
-    const emailName = extractNameFromEmail(input.email);
-    if (emailName && emailName.length > 2) name = emailName;
   }
 
   // National ID validation
@@ -345,7 +342,7 @@ function resolveHefProfile(input = {}) {
   }
 
   if (!name) {
-    name = nationalId !== "Data not found" ? `HEF Loanee (${nationalId})` : "Data not found";
+    name = "Data not found";
   }
 
   const email = (input.email && !isBoilerplateText(input.email)) ? input.email : (input.credential && input.credential.includes("@") ? input.credential : null);
@@ -440,7 +437,7 @@ function resolveHefProfile(input = {}) {
 
   const awardedPrincipal = input.loanAwarded !== undefined && input.loanAwarded !== null
     ? input.loanAwarded
-    : (input.awardedPrincipal !== undefined ? input.awardedPrincipal : (annualTotalLoan && yearOfStudy ? annualTotalLoan * yearOfStudy : null));
+    : (input.awardedPrincipal !== undefined && input.awardedPrincipal !== null ? input.awardedPrincipal : null);
 
   const totalDisbursedLoan = input.totalDisbursedLoan || null;
   const totalDisbursedScholarship = input.scholarshipAmount || input.totalDisbursedScholarship || null;
