@@ -748,8 +748,8 @@ async function performLogin(email, password) {
   userPasswordState = (password || userPasswordState || "");
 
   const g = ++GEN;
-  showTyping(`Connecting to portal.hef.co.ke/auth/signin for "${userEmailState}"…`);
-  const tc = renderToolCard("hef_portal_signin", { portalUrl: "https://portal.hef.co.ke/auth/signin", credential: userEmailState });
+  showTyping(`Interacting with portal.hef.co.ke frontend to log in for "${userEmailState}"…`);
+  const tc = renderToolCard("hef_portal_signin", { portalUrl: "https://portal.hef.co.ke/auth/signin", credential: userEmailState, interaction: "frontend_browser_automation" });
 
   try {
     const res = await apiCall(API.auth, {
@@ -1809,25 +1809,35 @@ function extractConversationalCredentials(text) {
     email = emailMatch[1].trim();
   }
 
-  // 2. Explicit National ID with label (e.g. "national id: 12345678", "id 12345678", "user 12345678")
+  // 2. Explicit National ID with label (e.g. "national id: 12345678", "id 12345678", "user 12345678", "id: 12345678", "id no 12345678")
   if (!email) {
-    const idLabelRegex = /(?:national\s*id|id\s*(?:no|number)?|idnum|user\s*(?:id|name)?|username|credential)\s*[:=]?\s*(\d{5,10})\b/i;
+    const idLabelRegex = /(?:national\s*id(?:\s*(?:no|number))?|id\s*(?:no|number)?|idnum|user\s*(?:id|name)?|username|credential)\s*[:=]?\s*(\d{5,10})\b/i;
     const idLabelMatch = str.match(idLabelRegex);
     if (idLabelMatch && idLabelMatch[1] && !str.toLowerCase().includes("paybill") && !str.toLowerCase().includes("200800") && idLabelMatch[1] !== "200800") {
       email = idLabelMatch[1].trim();
     }
   }
 
-  // 3. Password extraction with explicit keyword
-  const passRegex = /(?:password|pass|pwd|pin|secret|portal\s*pass(?:word)?)\s*(?:is|:|=)?\s*([^\s,;]+)/i;
+  // 3. Password extraction with explicit keyword (e.g. "password: pass", "password is pass", "pass: pass", "pwd: pass", "secret: pass")
+  const passRegex = /(?:password|pass|pwd|pin|secret|portal\s*pass(?:word)?)\s*(?:is|:|=)?\s*["']?([^\s,"';]+)["']?/i;
   const passMatch = str.match(passRegex);
   if (passMatch && passMatch[1]) {
     password = passMatch[1].trim();
   }
 
-  // 4. Two-token inputs like: "student@example.com MyPass123" or "login 12345678 MyPass123" or "12345678 MyPass123"
-  if (!email) {
-    const directIdRegex = /^\s*(?:login\s*(?:with|as|using)?\s*)?(\d{5,10})\s+([^\s,;]+)\s*$/i;
+  // 4. "log in with/as/using [ID/Email] and [Password]"
+  if (!email || !password) {
+    const loginWithRegex = /(?:log\s*in|login|sign\s*in|signin|connect|authenticate)\s*(?:with|as|using)?\s*(\d{5,10}|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\s*(?:and|with|password|pass|is|:)?\s*["']?([^\s,"';]+)["']?/i;
+    const loginWithMatch = str.match(loginWithRegex);
+    if (loginWithMatch && loginWithMatch[1] && loginWithMatch[2] && loginWithMatch[1] !== "200800") {
+      if (!email) email = loginWithMatch[1].trim();
+      if (!password) password = loginWithMatch[2].trim();
+    }
+  }
+
+  // 5. Two-token inputs like: "student@example.com MyPass123" or "login 12345678 MyPass123" or "12345678 MyPass123"
+  if (!email && !password) {
+    const directIdRegex = /^\s*(?:(?:log\s*in|login|sign\s*in|signin)\s*(?:with|as|using)?\s*)?(\d{5,10})\s+([^\s,;]+)\s*$/i;
     const directMatch = str.match(directIdRegex);
     if (directMatch && directMatch[1] && directMatch[2] && directMatch[1] !== "200800") {
       email = directMatch[1].trim();
@@ -1835,28 +1845,29 @@ function extractConversationalCredentials(text) {
     }
   }
 
+  // 6. If email/ID was found and password wasn't extracted by keyword, check remaining token
   if (email && !password) {
     const remainder = str.replace(email, "")
-      .replace(/(?:email|credential|username|national\s*id|id\s*no|id|user|password|pass|pwd|pin|and|is|my|to|with|using|portal|log\s*in|sign\s*in|[:=,;])/gi, " ")
+      .replace(/(?:email|credential|username|national\s*id|id\s*no|id\s*number|id|user|password|pass|pwd|pin|secret|and|is|my|to|with|using|portal|log\s*in|sign\s*in|signin|login|for|me|according|[:=,;"'])/gi, " ")
       .trim();
     const tokens = remainder.split(/\s+/).filter(t => t.length > 0);
-    if (tokens.length === 1 && tokens[0].length >= 3 && !/^(hi|hello|hey|help|status|band|loan|balance|login|signin)$/i.test(tokens[0])) {
-      password = tokens[0];
+    if (tokens.length === 1 && tokens[0].length >= 3 && !/^(hi|hello|hey|help|status|band|loan|balance|login|signin|hef|helb|portal)$/i.test(tokens[0])) {
+      password = tokens[0].replace(/^["']|["']$/g, '');
     }
   }
 
-  // 5. Standalone ID input when user is not authenticated (e.g. replying to prompt with just their ID)
+  // 7. Standalone ID input when user is not authenticated (e.g. replying to prompt with just their ID)
   if (!email && !password && !S.auth) {
-    const standaloneId = str.replace(/(?:my\s*national\s*id\s*is|my\s*id\s*is|national\s*id|id\s*no|id)\s*[:=]?\s*/i, "").trim();
+    const standaloneId = str.replace(/(?:my\s*national\s*id\s*is|my\s*id\s*is|national\s*id|id\s*no|id\s*number|id)\s*[:=]?\s*/i, "").trim();
     if (/^\d{5,10}$/.test(standaloneId) && !str.toLowerCase().includes("paybill") && !str.toLowerCase().includes("200800") && standaloneId !== "200800") {
       email = standaloneId;
     }
   }
 
-  // 6. Standalone password input when userEmailState is already saved
+  // 8. Standalone password input when userEmailState is already saved
   if (!password && !email && userEmailState && !S.auth) {
-    const clean = str.replace(/(?:my\s*password\s*is|password\s*is|password|pass|pwd|pin)\s*:?\s*/i, "").trim();
-    if (clean && !clean.includes(" ") && clean.length >= 3 && !/^(hi|hello|hey|help|status|band|loan|balance|disbursement|statement|clearance|logout|login)$/i.test(clean)) {
+    const clean = str.replace(/(?:my\s*password\s*is|password\s*is|password|pass|pwd|pin|secret)\s*[:=]?\s*/i, "").trim().replace(/^["']|["']$/g, '');
+    if (clean && !clean.includes(" ") && clean.length >= 3 && !/^(hi|hello|hey|help|status|band|loan|balance|disbursement|statement|clearance|logout|login|signin|yes|no)$/i.test(clean)) {
       password = clean;
     }
   }
@@ -1953,6 +1964,20 @@ function extractConversationalUpdates(text) {
 async function processHelbMessage(text, g) {
   const t = text.toLowerCase().trim();
 
+  // 0. CHECK FOR ACTIVE OTP SUBMISSION OR CANCELLATION
+  if (currentOtpSessionId) {
+    if (/^(cancel|abort|stop|back|exit)$/i.test(t)) {
+      cancelOtpLogin();
+      return null;
+    }
+    const otpCodeMatch = text.match(/(?:otp|code|pin|verification\s*code)?\s*[:=]?\s*(\d{4,8})\b/i);
+    if (otpCodeMatch && otpCodeMatch[1]) {
+      const code = otpCodeMatch[1].trim();
+      await submitOtp(code, currentOtpSessionId);
+      return null;
+    }
+  }
+
   // 1. Guardrail check
   if (!isHelbDomain(t)) {
     return {
@@ -1961,12 +1986,12 @@ async function processHelbMessage(text, g) {
     };
   }
 
-  // 2. EXPLICIT LOGIN REQUESTS
-  if (/^(login|signin|log in|sign in|auth|connect portal|connect account|sync portal)$/i.test(t)) {
-    openLoginModal();
+  // 2. EXPLICIT LOGOUT OR ACCOUNT SWITCHING
+  if (/^(logout|log\s*out|sign\s*out|signout|disconnect|switch\s*account|exit\s*session)$/i.test(t)) {
+    logout();
     return {
-      text: `Please enter the **Email Address or National ID** and **Password** you used to register on [portal.hef.co.ke](https://portal.hef.co.ke) below to connect your official HEF portal account:`,
-      html: renderAuthGateCard(userEmailState)
+      text: `You have been logged out of the HEF portal. Please sign in below whenever you are ready to reconnect:`,
+      html: renderAuthGateCard()
     };
   }
 
@@ -1979,12 +2004,13 @@ async function processHelbMessage(text, g) {
     return null;
   }
 
-  if (creds.email && !creds.password && !S.auth && /password|pass|login|signin/i.test(text)) {
+  if (creds.email && !creds.password && !S.auth && /password|pass|login|signin|sign\s*in|log\s*in|connect|auth/i.test(text)) {
     userEmailState = creds.email;
     handleCredentialChange(userEmailState);
     const isId = /^\d{5,10}$/.test(userEmailState);
+    openLoginModal();
     return {
-      text: `Got your registered HEF portal ${isId ? "National ID" : "Email"}: **${userEmailState}**.\n\nPlease provide your **HEF portal password** below to complete authentication, connect to portal.hef.co.ke, and retrieve your official student records:`,
+      text: `Got your registered HEF portal ${isId ? "National ID" : "Email"}: **${userEmailState}**.\n\nPlease provide your **HEF portal password** below to complete authentication, connect directly to **portal.hef.co.ke**, and retrieve your official student records:`,
       html: renderAuthGateCard(userEmailState)
     };
   }
@@ -1993,6 +2019,20 @@ async function processHelbMessage(text, g) {
     userPasswordState = creds.password;
     await performLogin(userEmailState, userPasswordState);
     return null;
+  }
+
+  // 4. EXPLICIT LOGIN REQUESTS & PORTAL INTERACTION INQUIRIES
+  if (
+    /^(?:please\s*)?(?:i\s*want\s*to\s*|can\s*you\s*|help\s*me\s*|how\s*(?:do\s*i|to)\s*|allow\s*the\s*agent\s*to\s*)?(?:log\s*in|login|sign\s*in|signin|connect\s*(?:to\s*)?(?:the\s*)?(?:hef|helb)?\s*portal|connect\s*(?:my\s*)?account|sync\s*portal|authenticate|interact\s*with\s*(?:the\s*)?(?:frontend\s*(?:part)?\s*of\s*)?(?:the\s*)?(?:hef|helb)?\s*portal)(?:\s*(?:in\s*order\s*to\s*(?:be\s*able\s*to\s*)?log\s*in)?(?:\s*according\s*to\s*(?:the\s*)?user)?(?:\s*(?:to|with|into)?\s*(?:the\s*)?(?:hef|helb)?\s*(?:portal|account)?)?)?$/i.test(t) ||
+    (/\b(?:log\s*in|login|sign\s*in|signin|connect\s*portal|interact\s*with\s*(?:the\s*)?frontend)\b/i.test(t) && !/repay|apply|band|disburse|balance|statement|mpesa|clearance|appeal/i.test(t))
+  ) {
+    openLoginModal();
+    return {
+      text: S.auth
+        ? `You are currently authenticated with [portal.hef.co.ke](https://portal.hef.co.ke) for **${S.name || S.nationalId || S.email}**.\n\nTo switch accounts or re-authenticate, enter your registered credentials below:`
+        : `Please enter your registered **Email Address or Kenyan National ID** and **Password** below. I will navigate directly to [portal.hef.co.ke](https://portal.hef.co.ke), interact with the login form on the frontend using human-like stealth automation, and retrieve your authentic student records without guessing:`,
+      html: renderAuthGateCard(userEmailState)
+    };
   }
 
   // 4. Process any user details updates provided in conversation

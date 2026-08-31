@@ -573,6 +573,48 @@ async function runTests() {
     await testBrowser.close();
   });
 
+  await asyncTest("Human interaction engine accurately types credentials and clicks login button on portal frontend", async () => {
+    const testBrowser = await chromium.launch({ headless: true });
+    const testCtx = await testBrowser.newContext();
+    const testPage = await testCtx.newPage();
+    await human.setupHumanStealth(testPage);
+
+    const loginHtml = `
+      <!DOCTYPE html>
+      <html>
+        <body>
+          <form id="form-login">
+            <input type="text" id="form-email_add" name="email_add" value="" />
+            <input type="password" id="form-password" name="password" value="" />
+            <button type="submit" class="btn-signin" id="btn_login" onclick="event.preventDefault(); document.getElementById('login_status').innerText='SUBMITTED: ' + document.getElementById('form-email_add').value;">Login</button>
+            <div id="login_status">IDLE</div>
+          </form>
+        </body>
+      </html>
+    `;
+
+    await testPage.setContent(loginHtml);
+    const mousePos = { x: 100, y: 100 };
+
+    const emailInput = testPage.locator('#form-email_add');
+    const passInput = testPage.locator('#form-password');
+    const submitBtn = testPage.locator('.btn-signin');
+
+    await human.humanType(testPage, emailInput, "28471923", mousePos);
+    await human.humanType(testPage, passInput, "Secret#2024", mousePos);
+    await human.humanClick(testPage, submitBtn, mousePos);
+
+    const emailVal = await emailInput.inputValue();
+    const passVal = await passInput.inputValue();
+    const statusText = await testPage.locator('#login_status').innerText();
+
+    assert.strictEqual(emailVal, "28471923", "Human typing should enter exact National ID");
+    assert.strictEqual(passVal, "Secret#2024", "Human typing should enter exact password");
+    assert.strictEqual(statusText, "SUBMITTED: 28471923", "Human click should successfully trigger login submission");
+
+    await testBrowser.close();
+  });
+
   // ─────────────────────────────────────────────────────────────────────────
   // TEST GROUP 7: Fast Direct HTML Extraction & In-Memory Parsing (< 2ms)
   // ─────────────────────────────────────────────────────────────────────────

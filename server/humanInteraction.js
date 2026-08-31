@@ -184,7 +184,7 @@ async function humanType(page, locatorOrSelector, text, currentPos = { x: 100, y
     await humanClick(page, loc, currentPos);
 
     if (options.clearFirst) {
-      await loc.fill("");
+      await loc.fill("").catch(() => {});
       await sleep(randInt(60, 140));
     }
 
@@ -194,30 +194,44 @@ async function humanType(page, locatorOrSelector, text, currentPos = { x: 100, y
       const prevChar = i > 0 ? chars[i - 1] : "";
 
       // Base keystroke delay
-      let delay = Math.round(randGaussian(90, 25));
-      delay = Math.max(45, Math.min(220, delay));
+      let delay = Math.round(randGaussian(65, 18));
+      delay = Math.max(30, Math.min(160, delay));
 
       // Extra pause for word boundaries (spaces)
       if (char === " " || prevChar === " ") {
-        delay += randInt(60, 140);
+        delay += randInt(40, 90);
       }
 
       // Extra pause for special symbols and numbers (shift keys or hunt-and-peck)
       if (/[@#$%.+\-_/\\0-9]/.test(char)) {
-        delay += randInt(40, 110);
+        delay += randInt(30, 70);
       }
 
-      await page.keyboard.press(char);
+      await page.keyboard.type(char, { delay: 0 }).catch(async () => {
+        await page.keyboard.press(char).catch(() => {});
+      });
       await sleep(delay);
     }
 
+    // Verify input value matches exactly
+    const val = await loc.inputValue().catch(() => null);
+    if (val !== text) {
+      await loc.fill(text).catch(() => {});
+    }
+
+    // Dispatch events for framework reactivity (React, Vue, jQuery, etc.)
+    await loc.evaluate(el => {
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }).catch(() => {});
+
     // Post-typing pause (human reviewing what they typed)
-    await sleep(randInt(180, 450));
+    await sleep(randInt(120, 300));
   } catch (err) {
     // Fallback if locator fails
     try {
       const loc = typeof locatorOrSelector === "string" ? page.locator(locatorOrSelector).first() : locatorOrSelector;
-      await loc.fill(text);
+      await loc.fill(text).catch(() => {});
     } catch (_) {}
   }
 }

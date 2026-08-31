@@ -1494,20 +1494,31 @@ async function playwrightHefLogin(email, password) {
       };
     }
 
-    const emailSelector = '#form-email_add, input[name="email_add"], input[placeholder*="email or ID" i], input[name="email"], input[id*="email" i]';
+    // Dismiss any modal/dialog/announcement overlays if visible on portal frontend
+    try {
+      const dismissBtn = page.locator('.modal .close, .modal .btn-close, .modal button:has-text("Close"), .modal button:has-text("Dismiss"), button:has-text("Accept"), .cookie-banner button').first();
+      if (await dismissBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await dismissBtn.click().catch(() => {});
+      }
+    } catch (_) {}
+
+    const emailSelector = '#form-email_add, #email_add, #email, #national_id, #id_no, input[name="email_add"], input[name="email"], input[name="national_id"], input[name="id_no"], input[placeholder*="email" i], input[placeholder*="ID" i], input[placeholder*="national" i], input[type="text"], input[type="email"]';
     const emailLocator = page.locator(emailSelector).first();
     await emailLocator.waitFor({ state: "visible", timeout: 20000 });
 
-    const passSelector = '#form-password, input[name="password"], input[type="password"]';
+    const passSelector = '#form-password, #password, input[name="password"], input[type="password"], input[placeholder*="password" i]';
     const passwordLocator = page.locator(passSelector).first();
     await passwordLocator.waitFor({ state: "visible", timeout: 15000 });
 
-    // Fast-fill credentials
-    console.log("[playwright-login] ⚡ Fast-filling credentials into portal login form…");
-    await emailLocator.fill(email);
-    await passwordLocator.fill(password);
+    // Enter credentials into portal login frontend using human typing cadence
+    console.log("[playwright-login] ⚡ Entering credentials into portal login form with human cadence…");
+    await human.humanType(page, emailLocator, email, mousePos, { clearFirst: true });
+    await human.humanPause(120, 350);
+    await human.humanType(page, passwordLocator, password, mousePos, { clearFirst: true });
+    await human.humanPause(150, 450);
 
-    const submitBtn = page.locator('.btn-signin, #form-login button[type="submit"], button:has-text("Login")').first();
+    const submitBtnSelector = '#form-login button[type="submit"], .btn-signin, button[type="submit"]:has-text("Login"), button:has-text("Login"), button:has-text("Sign In"), button:has-text("Log in"), button[type="submit"], input[type="submit"]';
+    const submitBtn = page.locator(submitBtnSelector).first();
 
     let ajaxResponseData = null;
     const responsePromise = page.waitForResponse(
@@ -1519,7 +1530,7 @@ async function playwrightHefLogin(email, password) {
       } catch (_) {}
     }).catch(() => null);
 
-    await submitBtn.click();
+    await human.humanClick(page, submitBtn, mousePos);
 
     await Promise.race([
       responsePromise,
