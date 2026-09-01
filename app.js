@@ -2004,13 +2004,13 @@ async function processHelbMessage(text, g) {
     return null;
   }
 
-  if (creds.email && !creds.password && !S.auth && /password|pass|login|signin|sign\s*in|log\s*in|connect|auth/i.test(text)) {
+  if (creds.email && !creds.password && !S.auth) {
     userEmailState = creds.email;
     handleCredentialChange(userEmailState);
     const isId = /^\d{5,10}$/.test(userEmailState);
     openLoginModal();
     return {
-      text: `Got your registered HEF portal ${isId ? "National ID" : "Email"}: **${userEmailState}**.\n\nPlease provide your **HEF portal password** below to complete authentication, connect directly to **portal.hef.co.ke**, and retrieve your official student records:`,
+      text: `Got your registered HEF portal ${isId ? "National ID" : "Email"}: **${userEmailState}**.\n\n🔒 **Zero-Guessing Policy:** To fetch your authentic records directly from **portal.hef.co.ke** without guessing, please provide your **HEF portal password** below:`,
       html: renderAuthGateCard(userEmailState)
     };
   }
@@ -2035,13 +2035,13 @@ async function processHelbMessage(text, g) {
     };
   }
 
-  // 5. Explicitly address complaints about guessing or wrong details
-  if (/stop guessing|stop guess|guessing|guessed|guess|wrong detail|wrong name|not my name|real detail|authentic detail|correct detail|wrong info|wrong email|incorrect/i.test(t)) {
+  // 5. Explicitly address complaints about guessing or wrong details / Must fetch from portal
+  if (/stop\s*guessing|stop\s*guess|guessing|guessed|guess|wrong\s*detail|wrong\s*name|not\s*my\s*name|real\s*detail|authentic\s*detail|correct\s*detail|wrong\s*info|wrong\s*email|incorrect|must\s*fetch|fetch\s*(?:details?\s*)?from\s*(?:the\s*)?(?:helb|hef)?\s*portal|fetch\s*details|never\s*guess|don'?t\s*guess/i.test(t)) {
     const p = calculateCurrentProfile();
     return {
       text: S.auth
-        ? `✅ **Zero-Guessing Policy Active:** Huduma Smart is strictly bound to your authentic records from **portal.hef.co.ke** for **${S.name || S.nationalId || S.email}**.\n\n• **Name:** ${S.name || 'Not recorded on portal'}\n• **National ID:** ${S.nationalId || 'Not recorded on portal'}\n• **KCSE Index:** ${S.kcseIndex || 'Not recorded on portal'}\n• **Institution:** ${S.institution || 'Not recorded on portal'}\n• **Programme:** ${S.programme || 'Not recorded on portal'}\n• **Assigned Band:** ${S.band ? `Band ${S.band}` : (S.bandName || 'Pending portal assessment')}\n• **Outstanding Balance:** ${typeof p.outstandingBalance === 'number' ? 'KES ' + p.outstandingBalance.toLocaleString() : (p.outstandingBalance || 'Not recorded on portal')}\n\nHere is your verified portal dashboard:`
-        : `🔒 **Zero-Guessing Policy Active:** Huduma Smart **strictly avoids guessing student details, balances, or band placements**. All loanee records are confidential and stored on **portal.hef.co.ke**.\n\nTo view your verified student profile, authentic loan balance, and live disbursement schedule without guessing, please log in with your official **portal.hef.co.ke** credentials below:`,
+        ? `✅ **Zero-Guessing Policy Active:** Huduma Smart is strictly bound to your authentic records scraped directly from **portal.hef.co.ke** for **${S.name || S.nationalId || S.email}**.\n\n• **Name:** ${S.name || 'Not recorded on portal'}\n• **National ID:** ${S.nationalId || 'Not recorded on portal'}\n• **KCSE Index:** ${S.kcseIndex || 'Not recorded on portal'}\n• **Institution:** ${S.institution || 'Not recorded on portal'}\n• **Programme:** ${S.programme || 'Not recorded on portal'}\n• **Assigned Band:** ${S.band ? `Band ${S.band}` : (S.bandName || 'Pending portal assessment')}\n• **Outstanding Balance:** ${typeof p.outstandingBalance === 'number' ? 'KES ' + p.outstandingBalance.toLocaleString() : (p.outstandingBalance || 'Not recorded on portal')}\n\nHere is your verified portal dashboard:`
+        : `🔒 **Zero-Guessing Policy Active:** Huduma Smart **strictly avoids guessing student details, balances, or band placements**. All loanee records are confidential and stored securely on **portal.hef.co.ke**.\n\nTo view your verified student profile, authentic loan balance, and live disbursement schedule without guessing, please log in with your official **portal.hef.co.ke** credentials below:`,
       html: cardHefPortalDashboard(p)
     };
   }
@@ -2065,7 +2065,7 @@ async function processHelbMessage(text, g) {
   if (/^(?:what\s*is\s*my\s*name|who\s*am\s*i|my\s*name|tell\s*me\s*my\s*name)$/i.test(t) || (t.includes("name") && (t.includes("my") || t.includes("who")) && !t.includes("bank") && !t.includes("band"))) {
     if (!S.auth) {
       return {
-        text: `You are not currently logged in to the HEF Portal. Because Huduma Smart **strictly avoids guessing student details**, please log in below with your National ID/Email and Password to retrieve your authentic records from **portal.hef.co.ke**:`,
+        text: `You are not currently logged in to the HEF Portal. Because Huduma Smart **strictly avoids guessing student details and must fetch them from portal.hef.co.ke**, please log in below with your National ID/Email and Password:`,
         html: renderAuthGateCard(userEmailState)
       };
     }

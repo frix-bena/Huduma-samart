@@ -608,14 +608,14 @@ function extractUserDetailsFromText(text = "") {
     extracted.kcseIndex = kcseMatch[1].trim();
   }
 
-  // Extract Band only with explicit label
-  const bandMatch = text.match(/\b(?:assigned\s*band|my\s*band\s*is|band)\s*[:=]?\s*([1-5])\b/i);
+  // Extract Band with explicit or conversational label
+  const bandMatch = text.match(/\b(?:assigned\s*band|my\s*band\s*is|in\s*band|band)\s*[:=]?\s*([1-5])\b/i);
   if (bandMatch && bandMatch[1]) {
     extracted.band = parseInt(bandMatch[1], 10);
   }
 
-  // Extract Year of study only with explicit label
-  const yearMatch = text.match(/\b(?:year\s*of\s*study|study\s*year|current\s*year)\s*[:=]?\s*([1-6])\b/i);
+  // Extract Year of study with explicit or conversational label
+  const yearMatch = text.match(/\b(?:year\s*of\s*study|study\s*year|current\s*year|year)\s*[:=]?\s*([1-6])\b/i);
   if (yearMatch) {
     extracted.yearOfStudy = parseInt(yearMatch[1], 10);
   }
@@ -633,17 +633,21 @@ function extractUserDetailsFromText(text = "") {
     }
   }
 
-  // Extract University / Institution only with explicit label
-  const instExplicitMatch = text.match(/(?:institution|university|college|campus|polytechnic)\s*[:=]\s*([A-Za-z\s&()]+?)(?=(?:,|\.|\band\b|programme|course|band|year|$))/i);
-  if (instExplicitMatch && instExplicitMatch[1]) {
-    const instCandidate = instExplicitMatch[1].trim();
-    if (FIELD_VALIDATORS.institution(instCandidate)) {
+  // Extract University / Institution with explicit or conversational label
+  const instMatch = text.match(/(?:institution|university|college|campus|polytechnic)\s*[:=]\s*([A-Za-z\s&()]+?)(?=(?:,|\.|\band\b|programme|course|band|year|$))/i) ||
+                    text.match(/(?:(?:studying|enrolled|student)\s+(?:[A-Za-z\s&()]+\s+)?at\s+|at\s+)(University\s+of\s+[A-Za-z\s&()]+|[A-Za-z\s&()]+\s+University|[A-Za-z\s&()]+\s+College|[A-Za-z\s&()]+\s+Polytechnic|[A-Za-z\s&()]+\s+Institute)(?=(?:,|\.|\band\b|programme|course|band|year|$))/i);
+  if (instMatch && instMatch[1]) {
+    const instCandidate = instMatch[1].trim();
+    if (instCandidate.length >= 3 && FIELD_VALIDATORS.institution(instCandidate)) {
       extracted.institution = instCandidate;
     }
+  } else if (/university of nairobi|kenyatta university|moi university|egerton university|jkuat|tuk/i.test(text)) {
+    const m = text.match(/\b(University of Nairobi|Kenyatta University|Moi University|Egerton University|JKUAT|TUK)\b/i);
+    if (m) extracted.institution = m[1];
   }
 
-  // Extract Programme only with explicit label
-  const progExplicitMatch = text.match(/(?:programme|course|degree|diploma)\s*[:=]\s*([A-Za-z\s&()]+?)(?=(?:,|\.|\band\b|institution|university|band|year|$))/i);
+  // Extract Programme with explicit or conversational label
+  const progExplicitMatch = text.match(/(?:programme|course|degree|diploma|studying)\s*(?:of|in)?\s*[:=]?\s*([A-Za-z\s&()]+?)(?=(?:\s+at\b|\s+in\b|,|\.|\band\b|institution|university|band|year|$))/i);
   if (progExplicitMatch && progExplicitMatch[1]) {
     const progCandidate = progExplicitMatch[1].trim();
     if (FIELD_VALIDATORS.programme(progCandidate)) {
@@ -1056,24 +1060,24 @@ function extractDataFromHtml(html = "", url = "") {
     if (!v || v === "-" || v === "N/A" || isBoilerplateText(v)) return;
 
     // Student Name
-    if (!extracted.name && /^(full\s*name|student\s*name|loanee\s*name|applicant\s*name|name|unames|names)$/i.test(l)) {
+    if (!extracted.name && /^(full\s*name|student\s*name|loanee\s*name|applicant\s*name|name|unames|names|user_name)$/i.test(l)) {
       if (FIELD_VALIDATORS.name(v)) extracted.name = v;
     }
     // National ID
-    if (!extracted.nationalId && /^(national\s*id|id\s*number|id\s*no|identity\s*no|user\s*id|id)$/i.test(l)) {
+    if (!extracted.nationalId && /^(national\s*id|id\s*number|id\s*no|identity\s*no|user\s*id|id|national_id|id_no|idnumber)$/i.test(l)) {
       const cleanId = v.replace(/[^0-9]/g, "");
       if (FIELD_VALIDATORS.nationalId(cleanId)) extracted.nationalId = cleanId;
     }
     // KCSE Index
-    if (!extracted.kcseIndex && /^(kcse\s*index|kcse\s*index\s*no|index\s*number|index\s*no|kcse\s*no)$/i.test(l)) {
+    if (!extracted.kcseIndex && /^(kcse\s*index|kcse\s*index\s*no|index\s*number|index\s*no|kcse\s*no|kcse_index)$/i.test(l)) {
       if (FIELD_VALIDATORS.kcseIndex(v)) extracted.kcseIndex = v;
     }
     // Institution
-    if (!extracted.institution && /^(institution|university|college|school|institution\s*of\s*study)$/i.test(l)) {
+    if (!extracted.institution && /^(institution|university|college|school|institution\s*of\s*study|inst_name|institution_name)$/i.test(l)) {
       if (FIELD_VALIDATORS.institution(v)) extracted.institution = v;
     }
     // Programme
-    if (!extracted.programme && /^(programme|program|course|degree|academic\s*programme|course\s*of\s*study)$/i.test(l)) {
+    if (!extracted.programme && /^(programme|program|course|degree|academic\s*programme|course\s*of\s*study|prog_name|programme_name)$/i.test(l)) {
       if (FIELD_VALIDATORS.programme(v)) extracted.programme = v;
     }
     // Study Level
@@ -1091,12 +1095,12 @@ function extractDataFromHtml(html = "", url = "") {
       }
     }
     // Academic Year
-    if (!extracted.academicYear && /^(academic\s*year|financial\s*year)$/i.test(l)) {
+    if (!extracted.academicYear && /^(academic\s*year|financial\s*year|academic_year)$/i.test(l)) {
       const cleanYear = v.replace(/\s+/g, "");
       if (FIELD_VALIDATORS.academicYear(cleanYear)) extracted.academicYear = cleanYear;
     }
     // Year of Study
-    if (!extracted.yearOfStudy && /^(year\s*of\s*study|study\s*year|academic\s*year\s*of\s*study|year)$/i.test(l)) {
+    if (!extracted.yearOfStudy && /^(year\s*of\s*study|study\s*year|academic\s*year\s*of\s*study|year|study_year)$/i.test(l)) {
       const y = parseInt(v.replace(/[^0-9]/g, ""), 10);
       if (FIELD_VALIDATORS.yearOfStudy(y)) extracted.yearOfStudy = y;
     }
@@ -1106,19 +1110,19 @@ function extractDataFromHtml(html = "", url = "") {
       if (FIELD_VALIDATORS.currentSemester(s)) extracted.currentSemester = s;
     }
     // Bank Name
-    if (!extracted.bankName && /^(bank\s*name|bank|disbursement\s*bank|upkeep\s*bank)$/i.test(l)) {
+    if (!extracted.bankName && /^(bank\s*name|bank|disbursement\s*bank|upkeep\s*bank|bank_name)$/i.test(l)) {
       if (v.length > 1 && !isBoilerplateText(v)) extracted.bankName = v;
     }
     // Account Number
-    if (!extracted.accountNumber && /^(account\s*number|account\s*no|bank\s*account|account)$/i.test(l)) {
+    if (!extracted.accountNumber && /^(account\s*number|account\s*no|bank\s*account|account|account_number|acc_no)$/i.test(l)) {
       if (FIELD_VALIDATORS.accountNumber(v)) extracted.accountNumber = v;
     }
     // Phone
-    if (!extracted.phone && /^(mobile|phone|mobile\s*number|phone\s*number|telephone|cell)$/i.test(l)) {
+    if (!extracted.phone && /^(mobile|phone|mobile\s*number|phone\s*number|telephone|cell|usermobile|user_mobile|phone_no|user_phone)$/i.test(l)) {
       if (FIELD_VALIDATORS.phone(v)) extracted.phone = v;
     }
     // Email
-    if (!extracted.email && /^(email|email\s*address|e\s*mail)$/i.test(l)) {
+    if (!extracted.email && /^(email|email\s*address|e\s*mail|user_email|email_add)$/i.test(l)) {
       if (FIELD_VALIDATORS.email(v)) extracted.email = v;
     }
     // Outstanding Due
