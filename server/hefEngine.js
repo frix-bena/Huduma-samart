@@ -419,16 +419,16 @@ function resolveHefProfile(input = {}) {
   let householdPct = band ? band.householdPct : null;
 
   let annualTuition = programCost;
-  let annualScholarship = (annualTuition && scholarshipPct) ? Math.round(annualTuition * (scholarshipPct / 100)) : null;
-  let annualTuitionLoan = (annualTuition && loanPct) ? Math.round(annualTuition * (loanPct / 100)) : null;
-  let annualHouseholdTuition = (annualTuition && householdPct) ? Math.round(annualTuition * (householdPct / 100)) : null;
-  let annualUpkeepLoan = band ? band.upkeepAnnual : null;
+  let annualScholarship = input.scholarshipAmount !== undefined && input.scholarshipAmount !== null ? input.scholarshipAmount : ((annualTuition && scholarshipPct) ? Math.round(annualTuition * (scholarshipPct / 100)) : null);
+  let annualTuitionLoan = input.tuitionLoan !== undefined && input.tuitionLoan !== null ? input.tuitionLoan : ((annualTuition && loanPct) ? Math.round(annualTuition * (loanPct / 100)) : null);
+  let annualHouseholdTuition = input.householdFee !== undefined && input.householdFee !== null ? input.householdFee : ((annualTuition && householdPct) ? Math.round(annualTuition * (householdPct / 100)) : null);
+  let annualUpkeepLoan = input.upkeepLoan !== undefined && input.upkeepLoan !== null ? input.upkeepLoan : (band ? band.upkeepAnnual : null);
   let annualTotalLoan = (annualTuitionLoan !== null && annualUpkeepLoan !== null) ? annualTuitionLoan + annualUpkeepLoan : null;
 
-  let semTuitionLoan = annualTuitionLoan ? Math.round(annualTuitionLoan / 2) : null;
-  let semScholarship = annualScholarship ? Math.round(annualScholarship / 2) : null;
-  let semHouseholdTuition = annualHouseholdTuition ? Math.round(annualHouseholdTuition / 2) : null;
-  let semUpkeepLoan = annualUpkeepLoan ? Math.round(annualUpkeepLoan / 2) : null;
+  let semTuitionLoan = (typeof annualTuitionLoan === "number") ? Math.round(annualTuitionLoan / 2) : annualTuitionLoan;
+  let semScholarship = (typeof annualScholarship === "number") ? Math.round(annualScholarship / 2) : annualScholarship;
+  let semHouseholdTuition = (typeof annualHouseholdTuition === "number") ? Math.round(annualHouseholdTuition / 2) : annualHouseholdTuition;
+  let semUpkeepLoan = (typeof annualUpkeepLoan === "number") ? Math.round(annualUpkeepLoan / 2) : annualUpkeepLoan;
 
   // Outstanding / Disbursed / Repaid
   const outstandingBalance = input.outstandingDue !== undefined && input.outstandingDue !== null
@@ -589,42 +589,43 @@ function isHelbDomainQuery(text = "") {
 }
 
 /**
- * Extract user details explicitly provided in conversational chat
+ * Extract user details explicitly provided in conversational chat.
+ * Strictly requires explicit field labels so casual conversational words never get guessed as student details.
  */
 function extractUserDetailsFromText(text = "") {
   const extracted = {};
   if (!text) return extracted;
 
-  // Extract National ID (5 - 10 digits with label)
+  // Extract National ID (5 - 10 digits with explicit label)
   const idMatch = text.match(/\b(?:national\s*id|id\s*(?:no|number)?|idnum)\s*[:=]?\s*(\d{5,10})\b/i);
   if (idMatch && idMatch[1] && !text.toLowerCase().includes("paybill") && !text.toLowerCase().includes("200800") && idMatch[1] !== "200800") {
     extracted.nationalId = idMatch[1].trim();
   }
 
-  // Extract KCSE Index
+  // Extract KCSE Index with explicit label
   const kcseMatch = text.match(/(?:kcse\s*(?:index|no|number)?)\s*[:=]?\s*(\d{11}(?:\/\d{4})?)\b/i);
   if (kcseMatch && kcseMatch[1]) {
     extracted.kcseIndex = kcseMatch[1].trim();
   }
 
-  // Extract Band (Band 1, Band 2, Band 3, Band 4, Band 5)
-  const bandMatch = text.match(/\bband\s*([1-5])\b/i);
+  // Extract Band only with explicit label
+  const bandMatch = text.match(/\b(?:assigned\s*band|my\s*band\s*is|band)\s*[:=]?\s*([1-5])\b/i);
   if (bandMatch && bandMatch[1]) {
     extracted.band = parseInt(bandMatch[1], 10);
   }
 
-  // Extract Year of study (Year 1, 2nd year, year 3, etc.)
-  const yearMatch = text.match(/\b(?:year\s*([1-6])|([1-6])(?:st|nd|rd|th)\s*year)\b/i);
+  // Extract Year of study only with explicit label
+  const yearMatch = text.match(/\b(?:year\s*of\s*study|study\s*year|current\s*year)\s*[:=]?\s*([1-6])\b/i);
   if (yearMatch) {
-    extracted.yearOfStudy = parseInt(yearMatch[1] || yearMatch[2], 10);
+    extracted.yearOfStudy = parseInt(yearMatch[1], 10);
   }
-  const semMatch = text.match(/\b(?:semester\s*([1-2])|sem\s*([1-2]))\b/i);
+  const semMatch = text.match(/\b(?:semester|current\s*semester|sem)\s*[:=]?\s*([1-3])\b/i);
   if (semMatch) {
-    extracted.currentSemester = parseInt(semMatch[1] || semMatch[2], 10);
+    extracted.currentSemester = parseInt(semMatch[1], 10);
   }
 
-  // Extract Name
-  const nameMatch = text.match(/\b(?:my\s*name\s*is|use\s*(?:the)?\s*name|name\s*is|called)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})/);
+  // Extract Name only with explicit identification phrase
+  const nameMatch = text.match(/\b(?:my\s*name\s*is|use\s*(?:the)?\s*name|name\s*is)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,2})\b/);
   if (nameMatch && nameMatch[1]) {
     const candidate = nameMatch[1].trim();
     if (!/^(Helb|Huduma|Student|Undergraduate|Kenyatta|University|Moi|Egerton|Band|Loan|Good|Morning|Afternoon|Evening)/i.test(candidate)) {
@@ -632,24 +633,22 @@ function extractUserDetailsFromText(text = "") {
     }
   }
 
-  // Extract University / Institution
-  const lowerText = text.toLowerCase();
-  const instMatch = INSTITUTIONS.find(inst => {
-    const cleanName = inst.name.toLowerCase().replace(/\s*\([^)]*\)/g, "").trim();
-    return lowerText.includes(inst.name.toLowerCase()) ||
-      lowerText.includes(cleanName) ||
-      (inst.code && lowerText.includes(inst.code.toLowerCase()));
-  });
-  if (instMatch) {
-    extracted.institution = instMatch.name;
-    if (instMatch.level) extracted.level = instMatch.level;
+  // Extract University / Institution only with explicit label
+  const instExplicitMatch = text.match(/(?:institution|university|college|campus|polytechnic)\s*[:=]\s*([A-Za-z\s&()]+?)(?=(?:,|\.|\band\b|programme|course|band|year|$))/i);
+  if (instExplicitMatch && instExplicitMatch[1]) {
+    const instCandidate = instExplicitMatch[1].trim();
+    if (FIELD_VALIDATORS.institution(instCandidate)) {
+      extracted.institution = instCandidate;
+    }
   }
 
-  // Extract Programme
-  const progMatch = Object.entries(PROGRAMMES).find(([k]) => text.toLowerCase().includes(k));
-  if (progMatch) {
-    extracted.programme = progMatch[1].name;
-    extracted.level = progMatch[1].level;
+  // Extract Programme only with explicit label
+  const progExplicitMatch = text.match(/(?:programme|course|degree|diploma)\s*[:=]\s*([A-Za-z\s&()]+?)(?=(?:,|\.|\band\b|institution|university|band|year|$))/i);
+  if (progExplicitMatch && progExplicitMatch[1]) {
+    const progCandidate = progExplicitMatch[1].trim();
+    if (FIELD_VALIDATORS.programme(progCandidate)) {
+      extracted.programme = progCandidate;
+    }
   }
 
   return extracted;
@@ -920,77 +919,73 @@ function extractDataFromCapturedJson(capturedProfileData = {}, capturedResponses
 }
 
 /**
- * Dynamic Regex / Full-Text Fallback extraction from page innerText
+ * Dynamic Regex / Full-Text Fallback extraction from page innerText.
+ * Strictly matches ONLY when explicit label anchors exist, preventing guessing from random page text.
  */
 function extractDataFromPageRegex(text = "") {
   if (!text || typeof text !== "string") return {};
   const extracted = {};
 
-  // 1. KCSE Index: /\b\d{11}(?:\/\d{4})?\b/
+  // 1. KCSE Index with label
   const kcseLabeled = text.match(/(?:kcse(?:\s*index|\s*no\.?)?|index\s*no\.?|index\s*number)\s*[:#-]?\s*(\d{11}(?:\/\d{4})?)/i);
-  const kcseDirect = text.match(/\b(\d{11}(?:\/\d{4})?)\b/);
   if (kcseLabeled && kcseLabeled[1] && FIELD_VALIDATORS.kcseIndex(kcseLabeled[1])) {
     extracted.kcseIndex = kcseLabeled[1].trim();
-  } else if (kcseDirect && kcseDirect[1] && FIELD_VALIDATORS.kcseIndex(kcseDirect[1])) {
-    extracted.kcseIndex = kcseDirect[1].trim();
   }
 
-  // 2. Band: /\bBand\s*([1-5])\b/i
-  const bandLabeled = text.match(/(?:allocated\s*band|funding\s*band|assigned\s*band|current\s*band|band\s*allocated)\s*[:#-]?\s*Band\s*([1-5])\b/i);
-  const bandDirect = text.match(/\bBand\s*([1-5])\b/i);
+  // 2. Band with label
+  const bandLabeled = text.match(/(?:allocated\s*band|funding\s*band|assigned\s*band|current\s*band|band\s*allocated|hef\s*band|\bband)\s*[:#=-]?\s*(?:Band\s*)?([1-5])\b/i);
   if (bandLabeled && bandLabeled[1]) {
-    extracted.band = parseInt(bandLabeled[1], 10);
-    extracted.bandNum = parseInt(bandLabeled[1], 10);
-    extracted.bandName = `Band ${bandLabeled[1]}`;
-  } else if (bandDirect && bandDirect[1]) {
-    extracted.band = parseInt(bandDirect[1], 10);
-    extracted.bandNum = parseInt(bandDirect[1], 10);
-    extracted.bandName = `Band ${bandDirect[1]}`;
+    const b = parseInt(bandLabeled[1], 10);
+    extracted.band = b;
+    extracted.bandNum = b;
+    extracted.bandName = `Band ${b}`;
   }
 
-  // 3. National ID: /\b\d{8}\b/
-  const idLabeled = text.match(/(?:national\s*id(?:\s*no\.?)?|id\s*number|id\s*no\.?|id\/passport)\s*[:#-]?\s*(\d{6,10})\b/i);
-  const idDirect = text.match(/\b(\d{8})\b/);
+  // 3. National ID with label
+  const idLabeled = text.match(/(?:national\s*id(?:\s*no\.?)?|id\s*number|id\s*no\.?|id\/passport|student\s*id)\s*[:#-]?\s*(\d{5,10})\b/i);
   if (idLabeled && idLabeled[1] && FIELD_VALIDATORS.nationalId(idLabeled[1])) {
     extracted.nationalId = idLabeled[1].trim();
-  } else if (idDirect && idDirect[1] && FIELD_VALIDATORS.nationalId(idDirect[1])) {
-    extracted.nationalId = idDirect[1].trim();
   }
 
-  // 4. Currency/Outstanding Due: /KES\s*[\d,]+(?:\.\d{2})?/i
+  // 4. Currency/Outstanding Due with label
   const outLabeled = text.match(/(?:total\s*outstanding|outstanding\s*due|loan\s*balance|outstanding\s*balance|total\s*due|loan\s*due|total\s*loan\s*due)\s*[:#-]?\s*(KES\s*[\d,]+(?:\.\d{2})?|[\d,]+(?:\.\d{2})?)/i);
-  const outDirect = text.match(/\b(KES\s*[\d,]+(?:\.\d{2})?)\b/i);
   if (outLabeled && outLabeled[1] && !isBoilerplateText(outLabeled[1])) {
     const val = outLabeled[1].trim();
     extracted.outstandingDue = val.toUpperCase().startsWith("KES") ? val : `KES ${val}`;
-  } else if (outDirect && outDirect[1] && !isBoilerplateText(outDirect[1])) {
-    extracted.outstandingDue = outDirect[1].trim();
   }
 
-  // 5. Institution extraction
-  for (const inst of INSTITUTIONS) {
-    if (text.toLowerCase().includes(inst.name.toLowerCase()) || text.toLowerCase().includes(inst.code.toLowerCase())) {
-      if (FIELD_VALIDATORS.institution(inst.name)) {
-        extracted.institution = inst.name;
-        if (inst.level) extracted.level = inst.level;
-        break;
-      }
+  // 5. Total Awarded Principal with label
+  const awardedLabeled = text.match(/(?:total\s*loan\s*awarded|awarded\s*principal|loan\s*awarded|allocated\s*loan)\s*[:#-]?\s*(KES\s*[\d,]+(?:\.\d{2})?|[\d,]+(?:\.\d{2})?)/i);
+  if (awardedLabeled && awardedLabeled[1] && !isBoilerplateText(awardedLabeled[1])) {
+    extracted.loanAwarded = awardedLabeled[1].trim();
+  }
+
+  // 6. Scholarship with label
+  const scholLabeled = text.match(/(?:scholarship\s*awarded|total\s*scholarship|allocated\s*scholarship|government\s*scholarship)\s*[:#-]?\s*(KES\s*[\d,]+(?:\.\d{2})?|[\d,]+(?:\.\d{2})?)/i);
+  if (scholLabeled && scholLabeled[1] && !isBoilerplateText(scholLabeled[1])) {
+    extracted.scholarshipAmount = scholLabeled[1].trim();
+  }
+
+  // 7. Institution extraction ONLY when preceded by an explicit label anchor with colon or equal sign
+  const instLabeled = text.match(/(?:institution(?:\s*of\s*study|\s*name)?|university(?:\s*name)?|college(?:\s*name)?|polytechnic)\s*[:=]\s*([^\r\n,;]+)/i);
+  if (instLabeled && instLabeled[1]) {
+    const instCand = instLabeled[1].trim();
+    if (FIELD_VALIDATORS.institution(instCand)) {
+      extracted.institution = instCand;
     }
   }
 
-  // 6. Programme extraction
-  for (const [key, prog] of Object.entries(PROGRAMMES)) {
-    if (text.toLowerCase().includes(key) || text.toLowerCase().includes(prog.name.toLowerCase())) {
-      if (FIELD_VALIDATORS.programme(prog.name)) {
-        extracted.programme = prog.name;
-        extracted.level = prog.level;
-        break;
-      }
+  // 8. Programme extraction ONLY when preceded by an explicit label anchor with colon or equal sign
+  const progLabeled = text.match(/(?:programme(?:\s*of\s*study|\s*name)?|program(?:\s*of\s*study)?|course(?:\s*of\s*study|\s*name)?|degree(?:\s*name)?)\s*[:=]\s*([^\r\n,;]+)/i);
+  if (progLabeled && progLabeled[1]) {
+    const progCand = progLabeled[1].trim();
+    if (FIELD_VALIDATORS.programme(progCand)) {
+      extracted.programme = progCand;
     }
   }
 
-  // 7. Academic Year
-  const yearMatch = text.match(/\b(202[0-9]\s*[\/-]\s*202[0-9])\b/);
+  // 9. Academic Year with label
+  const yearMatch = text.match(/(?:academic\s*year|financial\s*year)\s*[:#-]?\s*(202[0-9]\s*[\/-]\s*202[0-9])/i);
   if (yearMatch && yearMatch[1]) {
     const cleanYear = yearMatch[1].replace(/\s+/g, "");
     if (FIELD_VALIDATORS.academicYear(cleanYear)) {
@@ -998,41 +993,40 @@ function extractDataFromPageRegex(text = "") {
     }
   }
 
-  // 8. Year of study
-  const studyYearMatch = text.match(/\b(?:year\s*([1-6])|([1-6])(?:st|nd|rd|th)\s*year)\b/i);
+  // 10. Year of study with label
+  const studyYearMatch = text.match(/(?:year\s*of\s*study|study\s*year|academic\s*year\s*of\s*study)\s*[:#-]?\s*([1-6])\b/i);
   if (studyYearMatch) {
-    const yVal = parseInt(studyYearMatch[1] || studyYearMatch[2], 10);
+    const yVal = parseInt(studyYearMatch[1], 10);
     if (FIELD_VALIDATORS.yearOfStudy(yVal)) {
       extracted.yearOfStudy = yVal;
     }
   }
 
-  // 9. Semester
-  const semMatch = text.match(/\b(?:semester\s*([1-3])|sem\s*([1-3]))\b/i);
+  // 11. Semester with label
+  const semMatch = text.match(/(?:current\s*semester|study\s*semester|semester|sem)\s*[:#-]?\s*([1-3])\b/i);
   if (semMatch) {
-    const sVal = parseInt(semMatch[1] || semMatch[2], 10);
+    const sVal = parseInt(semMatch[1], 10);
     if (FIELD_VALIDATORS.currentSemester(sVal)) {
       extracted.currentSemester = sVal;
     }
   }
 
-  // 10. Bank Name & Account Number
-  const bankMatch = text.match(/(?:Bank\s*Name|Bank|Upkeep\s*Bank)\s*[:#-]?\s*([A-Za-z\s]+(?:Bank|M-Pesa|SACCO|Microfinance))/i);
+  // 12. Bank Name & Account Number with labels
+  const bankMatch = text.match(/(?:bank\s*name|disbursement\s*bank|upkeep\s*bank|bank)\s*[:#-]?\s*([A-Za-z\s]+(?:Bank|M-Pesa|SACCO|Microfinance))/i);
   if (bankMatch && bankMatch[1] && !isBoilerplateText(bankMatch[1])) {
     extracted.bankName = bankMatch[1].trim();
   }
-  const accMatch = text.match(/(?:Account\s*Number|Account\s*No\.?|A\/C\s*No\.?)\s*[:#-]?\s*(\d{6,16})/i);
+  const accMatch = text.match(/(?:account\s*number|account\s*no\.?|a\/c\s*no\.?|bank\s*account)\s*[:#-]?\s*([\d\-]{4,20})\b/i);
   if (accMatch && accMatch[1] && FIELD_VALIDATORS.accountNumber(accMatch[1])) {
     extracted.accountNumber = accMatch[1].trim();
   }
 
-  // 11. Application Status & Ref
-  const appStatusMatch = text.match(/(?:Application\s*Status|Funding\s*Status|Status)\s*[:#-]?\s*([A-Za-z\s]{3,30})/i);
+  // 13. Application Status & Ref with labels
+  const appStatusMatch = text.match(/(?:application\s*status|funding\s*status|hef\s*status)\s*[:#-]?\s*([A-Za-z\s]{3,30})/i);
   if (appStatusMatch && appStatusMatch[1] && !isBoilerplateText(appStatusMatch[1]) && !/dashboard|menu|profile/i.test(appStatusMatch[1])) {
     extracted.applicationStatus = appStatusMatch[1].trim();
   }
-  const appRefMatch = text.match(/(?:Application\s*Ref|Ref\s*No\.?|Batch\s*No\.?)\s*[:#-]?\s*([A-Z0-9\/-]+)/i) ||
-                      text.match(/\b(HEF-[A-Z0-9-]+|HELB-[A-Z0-9-]+)\b/i);
+  const appRefMatch = text.match(/(?:application\s*(?:ref|reference|number)|ref\s*no\.?|batch\s*no\.?)\s*[:#-]?\s*([A-Z0-9\/-]+)/i);
   if (appRefMatch && appRefMatch[1] && !isBoilerplateText(appRefMatch[1])) {
     extracted.applicationRef = appRefMatch[1].trim();
   }
@@ -1042,14 +1036,149 @@ function extractDataFromPageRegex(text = "") {
 
 /**
  * Ultra-fast direct HTML extraction of authentic HEF portal fields.
- * Extracts fields from inputs, table cells, definition lists, spans, and dropdown elements
+ * Extracts fields from inputs, selects, textareas, table cells, definition lists, spans, badges, and cards
  * in pure in-memory JavaScript in < 2ms without launching a browser.
  */
 function extractDataFromHtml(html = "", url = "") {
   if (!html || typeof html !== "string") return {};
   const extracted = {};
 
-  // 1. Input fields extraction: <input ... id="..." name="..." value="..." />
+  const cleanVal = (str) => {
+    if (!str || typeof str !== "string") return "";
+    return str.replace(/<[^>]+>/g, " ").replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim();
+  };
+
+  // Helper to map labeled key/value pairs to profile attributes
+  const mapField = (label, val) => {
+    if (!label || !val || isBoilerplateText(val)) return;
+    const l = label.toLowerCase().replace(/[^a-z0-9]/g, " ").trim();
+    const v = cleanVal(val);
+    if (!v || v === "-" || v === "N/A" || isBoilerplateText(v)) return;
+
+    // Student Name
+    if (!extracted.name && /^(full\s*name|student\s*name|loanee\s*name|applicant\s*name|name|unames|names)$/i.test(l)) {
+      if (FIELD_VALIDATORS.name(v)) extracted.name = v;
+    }
+    // National ID
+    if (!extracted.nationalId && /^(national\s*id|id\s*number|id\s*no|identity\s*no|user\s*id|id)$/i.test(l)) {
+      const cleanId = v.replace(/[^0-9]/g, "");
+      if (FIELD_VALIDATORS.nationalId(cleanId)) extracted.nationalId = cleanId;
+    }
+    // KCSE Index
+    if (!extracted.kcseIndex && /^(kcse\s*index|kcse\s*index\s*no|index\s*number|index\s*no|kcse\s*no)$/i.test(l)) {
+      if (FIELD_VALIDATORS.kcseIndex(v)) extracted.kcseIndex = v;
+    }
+    // Institution
+    if (!extracted.institution && /^(institution|university|college|school|institution\s*of\s*study)$/i.test(l)) {
+      if (FIELD_VALIDATORS.institution(v)) extracted.institution = v;
+    }
+    // Programme
+    if (!extracted.programme && /^(programme|program|course|degree|academic\s*programme|course\s*of\s*study)$/i.test(l)) {
+      if (FIELD_VALIDATORS.programme(v)) extracted.programme = v;
+    }
+    // Study Level
+    if (!extracted.level && /^(level|study\s*level|level\s*of\s*study|programme\s*level)$/i.test(l)) {
+      extracted.level = v;
+    }
+    // Band
+    if (extracted.band === undefined && /^(band|allocated\s*band|funding\s*band|assigned\s*band|current\s*band)$/i.test(l)) {
+      const bMatch = v.match(/\b([1-5])\b/);
+      if (bMatch) {
+        const b = parseInt(bMatch[1], 10);
+        extracted.band = b;
+        extracted.bandNum = b;
+        extracted.bandName = `Band ${b}`;
+      }
+    }
+    // Academic Year
+    if (!extracted.academicYear && /^(academic\s*year|financial\s*year)$/i.test(l)) {
+      const cleanYear = v.replace(/\s+/g, "");
+      if (FIELD_VALIDATORS.academicYear(cleanYear)) extracted.academicYear = cleanYear;
+    }
+    // Year of Study
+    if (!extracted.yearOfStudy && /^(year\s*of\s*study|study\s*year|academic\s*year\s*of\s*study|year)$/i.test(l)) {
+      const y = parseInt(v.replace(/[^0-9]/g, ""), 10);
+      if (FIELD_VALIDATORS.yearOfStudy(y)) extracted.yearOfStudy = y;
+    }
+    // Current Semester
+    if (!extracted.currentSemester && /^(semester|current\s*semester|study\s*semester|sem)$/i.test(l)) {
+      const s = parseInt(v.replace(/[^0-9]/g, ""), 10);
+      if (FIELD_VALIDATORS.currentSemester(s)) extracted.currentSemester = s;
+    }
+    // Bank Name
+    if (!extracted.bankName && /^(bank\s*name|bank|disbursement\s*bank|upkeep\s*bank)$/i.test(l)) {
+      if (v.length > 1 && !isBoilerplateText(v)) extracted.bankName = v;
+    }
+    // Account Number
+    if (!extracted.accountNumber && /^(account\s*number|account\s*no|bank\s*account|account)$/i.test(l)) {
+      if (FIELD_VALIDATORS.accountNumber(v)) extracted.accountNumber = v;
+    }
+    // Phone
+    if (!extracted.phone && /^(mobile|phone|mobile\s*number|phone\s*number|telephone|cell)$/i.test(l)) {
+      if (FIELD_VALIDATORS.phone(v)) extracted.phone = v;
+    }
+    // Email
+    if (!extracted.email && /^(email|email\s*address|e\s*mail)$/i.test(l)) {
+      if (FIELD_VALIDATORS.email(v)) extracted.email = v;
+    }
+    // Outstanding Due
+    if (!extracted.outstandingDue && /^(total\s*outstanding|outstanding\s*due|loan\s*balance|outstanding\s*balance|total\s*due|total\s*loan\s*due)$/i.test(l)) {
+      extracted.outstandingDue = v.toUpperCase().startsWith("KES") ? v : `KES ${v}`;
+    }
+    // Loan Awarded
+    if (!extracted.loanAwarded && /^(total\s*loan\s*awarded|awarded\s*principal|loan\s*awarded|allocated\s*loan|total\s*loan)$/i.test(l)) {
+      extracted.loanAwarded = v;
+    }
+    // Scholarship
+    if (!extracted.scholarshipAmount && /^(scholarship|scholarship\s*awarded|total\s*scholarship|allocated\s*scholarship|government\s*scholarship)$/i.test(l)) {
+      extracted.scholarshipAmount = v;
+    }
+    // Tuition Loan
+    if (!extracted.tuitionLoan && /^(tuition\s*loan|tuition|allocated\s*tuition\s*loan|tuition\s*portion)$/i.test(l)) {
+      extracted.tuitionLoan = v;
+    }
+    // Upkeep Loan
+    if (!extracted.upkeepLoan && /^(upkeep\s*loan|upkeep|allocated\s*upkeep|living\s*allowance|upkeep\s*stipend)$/i.test(l)) {
+      extracted.upkeepLoan = v;
+    }
+    // Household Fee
+    if (!extracted.householdFee && /^(household\s*contribution|household\s*fee|family\s*contribution|household\s*portion|direct\s*fee)$/i.test(l)) {
+      extracted.householdFee = v;
+    }
+    // Total Repaid
+    if (extracted.totalRepaid === undefined && /^(total\s*repaid|amount\s*repaid|repaid|repayment\s*to\s*date|total\s*payment)$/i.test(l)) {
+      extracted.totalRepaid = v;
+    }
+    // County, Sub County, Constituency
+    if (!extracted.county && /^(county|home\s*county)$/i.test(l)) {
+      if (FIELD_VALIDATORS.county(v)) extracted.county = v;
+    }
+    if (!extracted.subCounty && /^(sub\s*county|subcounty|district)$/i.test(l)) {
+      if (FIELD_VALIDATORS.subCounty(v)) extracted.subCounty = v;
+    }
+    if (!extracted.constituency && /^(constituency|home\s*constituency)$/i.test(l)) {
+      if (FIELD_VALIDATORS.constituency(v)) extracted.constituency = v;
+    }
+    // Personal Details
+    if (!extracted.dob && /^(dob|date\s*of\s*birth|birth\s*date)$/i.test(l)) {
+      if (FIELD_VALIDATORS.dob(v)) extracted.dob = v;
+    }
+    if (!extracted.gender && /^(gender|sex)$/i.test(l)) {
+      if (FIELD_VALIDATORS.gender(v)) extracted.gender = v;
+    }
+    if (!extracted.registrationNumber && /^(registration\s*number|reg\s*no|admission\s*number|adm\s*no|student\s*reg\s*no)$/i.test(l)) {
+      if (FIELD_VALIDATORS.registrationNumber(v)) extracted.registrationNumber = v;
+    }
+    // Application Status & Ref
+    if (!extracted.applicationStatus && /^(application\s*status|hef\s*status|funding\s*status|status)$/i.test(l)) {
+      if (!/dashboard|menu|profile/i.test(v)) extracted.applicationStatus = v;
+    }
+    if (!extracted.applicationRef && /^(application\s*ref|application\s*reference|reference\s*number|ref\s*no|batch\s*number|batch\s*no)$/i.test(l)) {
+      extracted.applicationRef = v;
+    }
+  };
+
+  // 1. Input fields extraction (<input ... name="..." id="..." value="...">)
   const inputMatches = html.matchAll(/<input\b([^>]*?)>/gi);
   for (const match of inputMatches) {
     const attrs = match[1];
@@ -1057,130 +1186,114 @@ function extractDataFromHtml(html = "", url = "") {
     const idMatch = attrs.match(/\bid\s*=\s*["']([^"']+)["']/i);
     const valMatch = attrs.match(/\bvalue\s*=\s*["']([^"']*)["']/i);
 
-    const name = nameMatch ? nameMatch[1].toLowerCase().trim() : "";
-    const id = idMatch ? idMatch[1].toLowerCase().trim() : "";
+    const name = nameMatch ? nameMatch[1] : "";
+    const id = idMatch ? idMatch[1] : "";
     const val = valMatch ? valMatch[1].trim() : "";
 
-    if (!val || isBoilerplateText(val)) continue;
-
-    // National ID
-    if (!extracted.nationalId && (name === "user_id" || id === "user_id" || name === "id_number" || id === "id_number" || name === "id_no" || id === "id_no")) {
-      const cleanId = val.replace(/[^0-9]/g, "");
-      if (FIELD_VALIDATORS.nationalId(cleanId)) extracted.nationalId = cleanId;
-    }
-
-    // Name
-    if (!extracted.name && (name === "unames" || id === "unames" || name === "names" || id === "names" || name === "student_name" || id === "student_name")) {
-      if (FIELD_VALIDATORS.name(val)) extracted.name = val;
-    }
-
-    // KCSE Index
-    if (!extracted.kcseIndex && (name === "kcse_index" || id === "kcse_index" || name === "index_no" || id === "index_no" || name === "kcse_no" || id === "kcse_no")) {
-      if (FIELD_VALIDATORS.kcseIndex(val)) extracted.kcseIndex = val;
-    }
-
-    // Institution
-    if (!extracted.institution && (name === "institution" || id === "institution" || name === "university" || id === "university" || name === "college" || id === "college")) {
-      if (FIELD_VALIDATORS.institution(val)) extracted.institution = val;
-    }
-
-    // Programme
-    if (!extracted.programme && (name === "programme" || id === "programme" || name === "course" || id === "course" || name === "program" || id === "program")) {
-      if (FIELD_VALIDATORS.programme(val)) extracted.programme = val;
-    }
-
-    // Academic Year
-    if (!extracted.academicYear && (name === "academic_year" || id === "academic_year")) {
-      const cleanYear = val.replace(/\s+/g, "");
-      if (FIELD_VALIDATORS.academicYear(cleanYear)) extracted.academicYear = cleanYear;
-    }
-
-    // Year of Study
-    if (!extracted.yearOfStudy && (name === "study_year" || id === "study_year" || name === "year_of_study" || id === "year_of_study")) {
-      const yVal = parseInt(val.replace(/[^0-9]/g, ""), 10);
-      if (FIELD_VALIDATORS.yearOfStudy(yVal)) extracted.yearOfStudy = yVal;
-    }
-
-    // Mobile / Phone
-    if (!extracted.phone && (name === "usermobile" || id === "usermobile" || name === "mobile" || id === "mobile" || name === "phone" || id === "phone")) {
-      if (FIELD_VALIDATORS.phone(val)) extracted.phone = val;
-    }
-
-    // Email
-    if (!extracted.email && (name === "email" || id === "email" || name === "email_add" || id === "email_add")) {
-      if (FIELD_VALIDATORS.email(val)) extracted.email = val;
-    }
-
-    // Bank details
-    if (!extracted.bankName && (name === "bank_name" || id === "bank_name" || name === "bank" || id === "bank")) {
-      if (val.length > 1 && !isBoilerplateText(val)) extracted.bankName = val;
-    }
-    if (!extracted.accountNumber && (name === "account_number" || id === "account_number" || name === "account_no" || id === "account_no")) {
-      if (FIELD_VALIDATORS.accountNumber(val)) extracted.accountNumber = val;
-    }
-
-    // Location / County
-    if (!extracted.county && (name === "county" || id === "county")) {
-      if (FIELD_VALIDATORS.county(val)) extracted.county = val;
-    }
-    if (!extracted.subCounty && (name === "sub_county" || id === "sub_county")) {
-      if (FIELD_VALIDATORS.subCounty(val)) extracted.subCounty = val;
-    }
-    if (!extracted.constituency && (name === "constituency" || id === "constituency")) {
-      if (FIELD_VALIDATORS.constituency(val)) extracted.constituency = val;
-    }
-
-    // Personal details
-    if (!extracted.dob && (name === "dob" || id === "dob" || name === "date_of_birth")) {
-      if (FIELD_VALIDATORS.dob(val)) extracted.dob = val;
-    }
-    if (!extracted.gender && (name === "gender" || id === "gender")) {
-      if (FIELD_VALIDATORS.gender(val)) extracted.gender = val;
-    }
-    if (!extracted.registrationNumber && (name === "reg_no" || id === "reg_no" || name === "adm_no" || id === "adm_no")) {
-      if (FIELD_VALIDATORS.registrationNumber(val)) extracted.registrationNumber = val;
+    if (val && !isBoilerplateText(val)) {
+      if (name) mapField(name, val);
+      if (id && id !== name) mapField(id, val);
     }
   }
 
-  // 2. User dropdown name: e.g. <div class="dropdown-user">...<span class="user-name"><b>BERNARD GICHUKI</b></span>
-  if (!extracted.name) {
-    const namePattern1 = /class\s*=\s*["'][^"']*\buser-name\b[^"']*["'][^>]*>\s*<b>([^<]+)<\/b>/i;
-    const namePattern2 = /class\s*=\s*["'][^"']*\bprofile-username\b[^"']*["'][^>]*>([^<]+)</i;
-    const namePattern3 = /class\s*=\s*["'][^"']*\bstudent-name\b[^"']*["'][^>]*>([^<]+)</i;
-    const m = html.match(namePattern1) || html.match(namePattern2) || html.match(namePattern3);
-    if (m && m[1]) {
-      const cleanName = m[1].replace(/^welcome,?\s*/i, "").replace(/^(student|user|hi|hello):?\s*/i, "").trim();
-      if (FIELD_VALIDATORS.name(cleanName)) extracted.name = cleanName;
+  // 2. Select elements with selected option (<select name="...">...<option selected>Value</option></select>)
+  const selectMatches = html.matchAll(/<select\b([^>]*?)>([\s\S]*?)<\/select>/gi);
+  for (const match of selectMatches) {
+    const attrs = match[1];
+    const optionsHtml = match[2];
+    const nameMatch = attrs.match(/\bname\s*=\s*["']([^"']+)["']/i);
+    const idMatch = attrs.match(/\bid\s*=\s*["']([^"']+)["']/i);
+    const selectedOptMatch = optionsHtml.match(/<option\b[^>]*\bselected\b[^>]*>([^<]+)<\/option>/i);
+
+    if (selectedOptMatch && selectedOptMatch[1]) {
+      const selectedVal = selectedOptMatch[1].trim();
+      if (nameMatch) mapField(nameMatch[1], selectedVal);
+      if (idMatch) mapField(idMatch[1], selectedVal);
     }
   }
 
-  // 3. Band Badges: e.g. <span class="badge band-badge">Band 2</span> or <div class="band-allocated">Band 3</div>
-  if (!extracted.band) {
-    const bandBadgeMatch = html.match(/class\s*=\s*["'][^"']*\b(?:band-allocated|hef-band|band-badge|badge-band)\b[^"']*["'][^>]*>\s*([^<]+)</i);
-    if (bandBadgeMatch && bandBadgeMatch[1]) {
-      const bText = bandBadgeMatch[1].trim();
-      const bNumMatch = bText.match(/\b([1-5])\b/);
-      if (bNumMatch) {
-        extracted.band = parseInt(bNumMatch[1], 10);
-        extracted.bandNum = parseInt(bNumMatch[1], 10);
-        extracted.bandName = `Band ${bNumMatch[1]}`;
-      }
-    }
-  }
-
-  // 4. Table Rows for Disbursements: <tr> <td>...</td> <td>...</td> </tr>
+  // 3. Table rows: <tr> <th>Label</th> <td>Value</td> </tr> or <tr> <td>Label</td> <td>Value</td> </tr>
   const tableRows = html.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi);
-  const disbursements = [];
   for (const tr of tableRows) {
     const cells = [];
     const tdMatches = tr[1].matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi);
     for (const td of tdMatches) {
-      const text = td[1].replace(/<[^>]+>/g, " ").replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim();
-      cells.push(text);
+      cells.push(cleanVal(td[1]));
+    }
+    if (cells.length === 2) {
+      mapField(cells[0], cells[1]);
+    }
+  }
+
+  // 4. Definition lists: <dt>Label</dt> <dd>Value</dd>
+  const dlMatches = html.matchAll(/<dt\b[^>]*>([\s\S]*?)<\/dt>\s*<dd\b[^>]*>([\s\S]*?)<\/dd>/gi);
+  for (const dl of dlMatches) {
+    mapField(cleanVal(dl[1]), cleanVal(dl[2]));
+  }
+
+  // 5. AdminLTE Info-boxes & Small-boxes
+  const infoBoxMatches = html.matchAll(/<span\b[^>]*class\s*=\s*["'][^"']*\binfo-box-text\b[^"']*["'][^>]*>([\s\S]*?)<\/span>\s*<span\b[^>]*class\s*=\s*["'][^"']*\binfo-box-number\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/gi);
+  for (const ib of infoBoxMatches) {
+    mapField(cleanVal(ib[1]), cleanVal(ib[2]));
+  }
+
+  const smallBoxMatches = html.matchAll(/<div\b[^>]*class\s*=\s*["'][^"']*\binner\b[^"']*["'][^>]*>\s*<h3\b[^>]*>([\s\S]*?)<\/h3>\s*<p\b[^>]*>([\s\S]*?)<\/p>/gi);
+  for (const sb of smallBoxMatches) {
+    mapField(cleanVal(sb[2]), cleanVal(sb[1]));
+  }
+
+  // 6. Bootstrap List-Group Items: <li class="list-group-item"><b>Label</b> <a class="pull-right">Value</a></li>
+  const listGroupMatches = html.matchAll(/<li\b[^>]*class\s*=\s*["'][^"']*\blist-group-item\b[^"']*["'][^>]*>[\s\S]*?<b\b[^>]*>([\s\S]*?)<\/b>[\s\S]*?<(?:span|a|div)\b[^>]*class\s*=\s*["'][^"']*(?:pull-right|float-right|value)[^"']*["'][^>]*>([\s\S]*?)<\/(?:span|a|div)>/gi);
+  for (const lg of listGroupMatches) {
+    mapField(cleanVal(lg[1]), cleanVal(lg[2]));
+  }
+
+  // 7. Form-control-static or Label + Value pairs: <label>Label</label> <p class="form-control-static">Value</p>
+  const formStaticMatches = html.matchAll(/<label\b[^>]*>([\s\S]*?)<\/label>\s*<p\b[^>]*class\s*=\s*["'][^"']*\bform-control-static\b[^"']*["'][^>]*>([\s\S]*?)<\/p>/gi);
+  for (const fs of formStaticMatches) {
+    mapField(cleanVal(fs[1]), cleanVal(fs[2]));
+  }
+
+  // 8. User dropdown / Navbar name: e.g. <div class="dropdown-user">...<span class="user-name"><b>NAME</b></span>
+  if (!extracted.name) {
+    const namePattern1 = /class\s*=\s*["'][^"']*\buser-name\b[^"']*["'][^>]*>\s*<b>([^<]+)<\/b>/i;
+    const namePattern2 = /class\s*=\s*["'][^"']*\bprofile-username\b[^"']*["'][^>]*>([^<]+)</i;
+    const namePattern3 = /class\s*=\s*["'][^"']*\bstudent-name\b[^"']*["'][^>]*>([^<]+)</i;
+    const namePattern4 = /class\s*=\s*["'][^"']*\buser-panel\b[^"']*["'][^>]*>[\s\S]*?<p>([^<]+)<\/p>/i;
+    const m = html.match(namePattern1) || html.match(namePattern2) || html.match(namePattern3) || html.match(namePattern4);
+    if (m && m[1]) {
+      const cleanName = cleanVal(m[1]).replace(/^welcome,?\s*/i, "").replace(/^(student|user|hi|hello):?\s*/i, "").trim();
+      if (FIELD_VALIDATORS.name(cleanName)) extracted.name = cleanName;
+    }
+  }
+
+  // 9. Band Badges: e.g. <span class="badge band-badge">Band 2</span> or <div class="band-allocated">Band 3</div>
+  if (!extracted.band) {
+    const bandBadgeMatch = html.match(/class\s*=\s*["'][^"']*\b(?:band-allocated|hef-band|band-badge|badge-band)\b[^"']*["'][^>]*>\s*([^<]+)</i);
+    if (bandBadgeMatch && bandBadgeMatch[1]) {
+      const bText = cleanVal(bandBadgeMatch[1]);
+      const bNumMatch = bText.match(/\b([1-5])\b/);
+      if (bNumMatch) {
+        const b = parseInt(bNumMatch[1], 10);
+        extracted.band = b;
+        extracted.bandNum = b;
+        extracted.bandName = `Band ${b}`;
+      }
+    }
+  }
+
+  // 10. Table Rows for Disbursements (Multi-column tables)
+  const allRows = html.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi);
+  const disbursements = [];
+  for (const tr of allRows) {
+    const cells = [];
+    const tdMatches = tr[1].matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi);
+    for (const td of tdMatches) {
+      cells.push(cleanVal(td[1]));
     }
     if (cells.length >= 3) {
       const sanitized = cells.map(c => (c && c !== "-" && c !== "N/A" && !isBoilerplateText(c)) ? c : null);
-      if (sanitized[0] && !/academic|date|release|semester|purpose/i.test(sanitized[0])) {
+      if (sanitized[0] && !/academic|date|release|semester|purpose|sn|no\./i.test(sanitized[0])) {
         disbursements.push({
           date: sanitized[0] || null,
           semester: sanitized[1] || null,
@@ -1196,7 +1309,7 @@ function extractDataFromHtml(html = "", url = "") {
     extracted.disbursements = disbursements;
   }
 
-  // 5. Clean text regex extraction (stripping HTML tags)
+  // 11. Clean text regex extraction (stripping HTML tags) for labeled anchors
   const plainText = html
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, " ")
     .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, " ")

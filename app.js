@@ -1458,7 +1458,7 @@ function cardAppStatus(p, liveData = null) {
   const bandCategory = p.band?.category || "Evaluated";
   const studentIdentifier = S.name || (S.nationalId ? `ID: ${S.nationalId}` : (S.email || "Applicant"));
   const appStatus = liveData?.status || S.applicationStatus || (S.band ? "Approved &amp; Band Assigned" : "Evaluated");
-  const stage = liveData?.stage || "Stage 4: Admission Verified";
+  const stage = liveData?.stage || S.stage || (S.disbursements && S.disbursements.length > 0 ? "Funds Disbursed" : (S.band ? "Band Allocated" : "Under Evaluation"));
   const provenanceUrl = liveData?.sourceUrl || "https://portal.hef.co.ke/service/index/frm_loan_status";
   const provenanceSection = liveData?.section || "My Applications / Status Tracking";
 
@@ -1981,7 +1981,7 @@ async function processHelbMessage(text, g) {
   // 1. Guardrail check
   if (!isHelbDomain(t)) {
     return {
-      text: `I am **Huduma Smart**, an AI assistant specialized **exclusively in Higher Education Loans Board (HELB) and Higher Education Financing (HEF)** portal services in Kenya.\n\nI can assist you with:\n\n• 💰 **Checking loan balances & 4% undergraduate interest**\n• 📊 **HEF Band breakdowns (Bands 1 to 5) & scholarship %**\n• 📅 **Disbursement schedules & upkeep stipend transfers**\n• 📑 **Generating official HELB loan statements & receipts**\n• 💳 **Live loan repayments via M-Pesa STK Push / Paybill 200800**\n• 📝 **Applying for loans, scholarships & band appeals**\n• 🏢 **Employer deduction remittances & bulk checkoff**\n• 🔍 **HELB Clearance & Compliance certificates**\n\nPlease ask any question regarding your HELB/HEF student funding!`,
+      text: `I am **Huduma Smart**, an AI assistant specialized **exclusively in Higher Education Loans Board (HELB) and Higher Education Financing (HEF)** portal services in Kenya.\n\nI can assist you with:\n\n• 💰 **Checking real loan balances & 4% undergraduate interest**\n• 📊 **Official HEF Band breakdowns (Bands 1 to 5) & scholarship %**\n• 📅 **Live disbursement schedules & upkeep stipend transfers**\n• 📑 **Generating official HELB loan statements & receipts**\n• 💳 **Live loan repayments via M-Pesa STK Push / Paybill 200800**\n• 📝 **Applying for loans, scholarships & band appeals**\n• 🏢 **Employer deduction remittances & bulk checkoff**\n• 🔍 **HELB Clearance & Compliance certificates**\n\nPlease ask any question regarding your HELB/HEF student funding!`,
       html: null
     };
   }
@@ -2035,79 +2035,19 @@ async function processHelbMessage(text, g) {
     };
   }
 
-  // 4. Process any user details updates provided in conversation
-  const updates = extractConversationalUpdates(text);
-  let updatedAny = false;
-  if (updates.name && updates.name !== S.name) {
-    S.name = updates.name;
-    updatedAny = true;
-  }
-  if (updates.nationalId && updates.nationalId !== S.nationalId) {
-    S.nationalId = updates.nationalId;
-    updatedAny = true;
-  }
-  if (updates.kcseIndex && updates.kcseIndex !== S.kcseIndex) {
-    S.kcseIndex = updates.kcseIndex;
-    updatedAny = true;
-  }
-  if (updates.institution && updates.institution !== S.institution) {
-    S.institution = updates.institution;
-    updatedAny = true;
-  }
-  if (updates.programme && updates.programme !== S.programme) {
-    S.programme = updates.programme;
-    updatedAny = true;
-  }
-  if (updates.band && updates.band !== S.band) {
-    S.band = updates.band;
-    updatedAny = true;
-  }
-  if (updates.yearOfStudy && updates.yearOfStudy !== S.yearOfStudy) {
-    S.yearOfStudy = updates.yearOfStudy;
-    updatedAny = true;
-  }
-  if (updates.currentSemester && updates.currentSemester !== S.currentSemester) {
-    S.currentSemester = updates.currentSemester;
-    updatedAny = true;
-  }
-  if (updates.bankName && updates.bankName !== S.bankName) {
-    S.bankName = updates.bankName;
-    updatedAny = true;
-  }
-  if (updates.accountNumber && updates.accountNumber !== S.accountNumber) {
-    S.accountNumber = updates.accountNumber;
-    updatedAny = true;
-  }
-  if (updates.phone && updates.phone !== S.phone) {
-    S.phone = updates.phone;
-    updatedAny = true;
-  }
-
-  if (updatedAny) {
-    saveSessionState();
-    updateSessionUI();
-  }
-
-  // 5. Calculate realistic profile based on user's exact HEF records or consultative parameters
-  const p = calculateCurrentProfile();
-
-  // Address complaints about wrong details
-  if (/same response|wrong detail|wrong name|not my name|correct detail|wrong info|wrong email|incorrect|guessing|guessed|guess/i.test(t)) {
+  // 5. Explicitly address complaints about guessing or wrong details
+  if (/stop guessing|stop guess|guessing|guessed|guess|wrong detail|wrong name|not my name|real detail|authentic detail|correct detail|wrong info|wrong email|incorrect/i.test(t)) {
+    const p = calculateCurrentProfile();
     return {
       text: S.auth
-        ? `All records and balances are retrieved directly from your authentic account on **portal.hef.co.ke** for **${S.name || S.nationalId || S.email}** without guessing.\n\nIf you need to switch accounts or correct your details, you can log out anytime using the button below.`
-        : `Huduma Smart **strictly avoids guessing student details or balances**. To view your verified loan records, exact assigned band, and authentic disbursement batches, please log in with your official **portal.hef.co.ke** credentials below:`,
+        ? `✅ **Zero-Guessing Policy Active:** Huduma Smart is strictly bound to your authentic records from **portal.hef.co.ke** for **${S.name || S.nationalId || S.email}**.\n\n• **Name:** ${S.name || 'Not recorded on portal'}\n• **National ID:** ${S.nationalId || 'Not recorded on portal'}\n• **KCSE Index:** ${S.kcseIndex || 'Not recorded on portal'}\n• **Institution:** ${S.institution || 'Not recorded on portal'}\n• **Programme:** ${S.programme || 'Not recorded on portal'}\n• **Assigned Band:** ${S.band ? `Band ${S.band}` : (S.bandName || 'Pending portal assessment')}\n• **Outstanding Balance:** ${typeof p.outstandingBalance === 'number' ? 'KES ' + p.outstandingBalance.toLocaleString() : (p.outstandingBalance || 'Not recorded on portal')}\n\nHere is your verified portal dashboard:`
+        : `🔒 **Zero-Guessing Policy Active:** Huduma Smart **strictly avoids guessing student details, balances, or band placements**. All loanee records are confidential and stored on **portal.hef.co.ke**.\n\nTo view your verified student profile, authentic loan balance, and live disbursement schedule without guessing, please log in with your official **portal.hef.co.ke** credentials below:`,
       html: cardHefPortalDashboard(p)
     };
   }
 
-  // If user explicitly provided updates without asking a separate question
-  if (updatedAny && !/band|scholarship|balance|disburse|statement|repay|paybill|appeal|clearance|support|apply|how/i.test(t)) {
-    return {
-      text: `✅ **Profile Records Updated!**\n\nI have updated your active session records with the verified information you provided.\n\nHere are your updated funding records:`,
-      html: cardHefPortalDashboard(p)
-    };
-  }
+  // 6. Calculate verified profile from active session
+  const p = calculateCurrentProfile();
 
   // Greetings
   if (/^(hello|hi|hey|habari|jambo|good\s*(morning|afternoon|evening)|start|help)$/i.test(t)) {
@@ -2120,7 +2060,106 @@ async function processHelbMessage(text, g) {
     };
   }
 
-  // 1. LOAN & SCHOLARSHIP APPLICATIONS
+  // SPECIFIC DETAIL INQUIRIES: Name, National ID, KCSE Index, Institution, Programme, Bank, Details
+  // 7. Student Name inquiry
+  if (/^(?:what\s*is\s*my\s*name|who\s*am\s*i|my\s*name|tell\s*me\s*my\s*name)$/i.test(t) || (t.includes("name") && (t.includes("my") || t.includes("who")) && !t.includes("bank") && !t.includes("band"))) {
+    if (!S.auth) {
+      return {
+        text: `You are not currently logged in to the HEF Portal. Because Huduma Smart **strictly avoids guessing student details**, please log in below with your National ID/Email and Password to retrieve your authentic records from **portal.hef.co.ke**:`,
+        html: renderAuthGateCard(userEmailState)
+      };
+    }
+    return {
+      text: `According to your official records on **portal.hef.co.ke**, your registered student name is **${S.name || 'Not recorded on portal'}** (National ID: **${S.nationalId || 'Not recorded'}**).`,
+      html: cardHefPortalDashboard(p)
+    };
+  }
+
+  // 8. National ID inquiry
+  if (/^(?:what\s*is\s*my\s*(?:national\s*)?id|my\s*id|my\s*national\s*id|check\s*my\s*id)$/i.test(t) || (t.includes("national id") && t.includes("my"))) {
+    if (!S.auth) {
+      return {
+        text: `You are not currently logged in to the HEF Portal. Please log in below with your credentials to retrieve your authentic records from **portal.hef.co.ke**:`,
+        html: renderAuthGateCard(userEmailState)
+      };
+    }
+    return {
+      text: `Your National ID registered on **portal.hef.co.ke** is **${S.nationalId || 'Not recorded on portal'}** (registered to **${S.name || 'Loanee'}**).`,
+      html: cardHefPortalDashboard(p)
+    };
+  }
+
+  // 9. KCSE Index inquiry
+  if (/^(?:what\s*is\s*my\s*kcse|my\s*kcse|my\s*index|kcse\s*index\s*no|kcse\s*number)$/i.test(t) || (t.includes("kcse") && t.includes("my"))) {
+    if (!S.auth) {
+      return {
+        text: `You are not currently logged in to the HEF Portal. Please log in below with your credentials to retrieve your authentic KCSE Index number from **portal.hef.co.ke**:`,
+        html: renderAuthGateCard(userEmailState)
+      };
+    }
+    return {
+      text: `Your KCSE Index number recorded on **portal.hef.co.ke** is **${S.kcseIndex || 'Not recorded on portal'}** (registered to **${S.name || 'Loanee'}**).`,
+      html: cardHefPortalDashboard(p)
+    };
+  }
+
+  // 10. Institution & Programme inquiry
+  if (/^(?:what\s*is\s*my\s*(?:institution|university|college|campus|school)|where\s*do\s*i\s*study|my\s*university|my\s*institution)$/i.test(t) || ((t.includes("university") || t.includes("institution") || t.includes("college")) && t.includes("my"))) {
+    if (!S.auth) {
+      return {
+        text: `You are not currently logged in to the HEF Portal. Please log in below with your credentials to retrieve your authentic admission & institution records from **portal.hef.co.ke**:`,
+        html: renderAuthGateCard(userEmailState)
+      };
+    }
+    return {
+      text: `Your registered institution on **portal.hef.co.ke** is **${S.institution || 'Not recorded on portal'}** (Programme: **${S.programme || 'Not recorded on portal'}**, Level: **${S.level || 'Undergraduate'}**).`,
+      html: cardHefPortalDashboard(p)
+    };
+  }
+
+  if (/^(?:what\s*is\s*my\s*(?:programme|program|course|degree)|my\s*course|my\s*programme|what\s*am\s*i\s*studying)$/i.test(t) || ((t.includes("course") || t.includes("programme") || t.includes("program")) && t.includes("my"))) {
+    if (!S.auth) {
+      return {
+        text: `You are not currently logged in to the HEF Portal. Please log in below to retrieve your registered course from **portal.hef.co.ke**:`,
+        html: renderAuthGateCard(userEmailState)
+      };
+    }
+    return {
+      text: `Your registered programme of study on **portal.hef.co.ke** is **${S.programme || 'Not recorded on portal'}** at **${S.institution || 'your institution'}**.`,
+      html: cardHefPortalDashboard(p)
+    };
+  }
+
+  // 11. Upkeep Bank & Account inquiry
+  if (/^(?:what\s*is\s*my\s*bank|my\s*bank\s*account|where\s*is\s*my\s*upkeep\s*sent|my\s*account\s*number|upkeep\s*account)$/i.test(t) || (t.includes("bank") && t.includes("my")) || (t.includes("account") && t.includes("upkeep"))) {
+    if (!S.auth) {
+      return {
+        text: `You are not currently logged in to the HEF Portal. Please log in below to view your verified upkeep disbursement bank account from **portal.hef.co.ke**:`,
+        html: renderAuthGateCard(userEmailState)
+      };
+    }
+    return {
+      text: `Your upkeep disbursement account registered on **portal.hef.co.ke** is **${S.bankName || 'Not recorded on portal'}** (Account Number: \`${S.accountNumber || 'Not recorded'}\`).`,
+      html: cardHefPortalDashboard(p)
+    };
+  }
+
+  // 12. Complete Profile / All Details inquiry
+  if (/profile|who am i|my details|my records|dashboard|portal details|show details|my info|my information/i.test(t)) {
+    if (!S.auth) {
+      return {
+        text: `You are not currently logged in to the HEF Portal. Because Huduma Smart **strictly avoids guessing student details**, please sign in below with your National ID/Email and Password to retrieve your verified loanee profile directly from **portal.hef.co.ke**:`,
+        html: cardHefPortalDashboard(p)
+      };
+    }
+    const balDisplay = typeof p.outstandingBalance === "number" ? `KES ${p.outstandingBalance.toLocaleString()}` : (p.outstandingBalance || "Not recorded on portal");
+    return {
+      text: `Here are your official student records retrieved directly from **portal.hef.co.ke** for **${S.name || S.nationalId || S.email}**:\n\n• **Student Name:** ${S.name || 'Not recorded on portal'}\n• **National ID:** ${S.nationalId || 'Not recorded on portal'}\n• **KCSE Index:** ${S.kcseIndex || 'Not recorded on portal'}\n• **Institution:** ${S.institution || 'Not recorded on portal'}\n• **Programme:** ${S.programme || 'Not recorded on portal'} (${S.level || 'Undergraduate'})\n• **Assigned Band:** ${S.band ? `Band ${S.band} (${p.band?.category || ''})` : (S.bandName || 'Pending portal assessment')}\n• **Current Outstanding Due:** ${balDisplay}\n• **Upkeep Disbursement Account:** ${S.bankName || 'Not recorded on portal'} (\`${S.accountNumber || 'Not recorded'}\`)`,
+      html: cardHefPortalDashboard(p)
+    };
+  }
+
+  // 13. LOAN & SCHOLARSHIP APPLICATIONS
   if (/apply|application form|first time helb|apply loan|apply scholarship|tvet application|undergraduate application|afya elimu/i.test(t)) {
     const tc = renderToolCard("submit_loan_application", { email: S.email || "consultation", nationalId: S.nationalId || "consultation" });
     tc.classList.add("tool-done");
@@ -2132,7 +2171,7 @@ async function processHelbMessage(text, g) {
     };
   }
 
-  // 2. STATUS TRACKING
+  // 14. STATUS TRACKING
   if (/application status|app status|track application|progress|mti score|evaluation stage/i.test(t)) {
     const tc = renderToolCard("get_application_status", { email: S.email || "consultation", nationalId: S.nationalId || "consultation", name: S.name || "Student" });
     tc.classList.add("tool-done");
@@ -2144,13 +2183,13 @@ async function processHelbMessage(text, g) {
     }
     return {
       text: S.auth
-        ? `Here is the current processing stage of your HEF loan and scholarship application on **portal.hef.co.ke** for **${S.name || S.nationalId || S.email}**:`
+        ? `According to **portal.hef.co.ke**, your application status is **${liveStatus?.status || S.applicationStatus || (S.band ? 'Approved & Band Assigned' : 'Under MTI Evaluation')}**${S.applicationRef ? ` (Application Reference: \`${S.applicationRef}\`)` : ''}:`
         : `To track your **live application progress, Means Testing (MTI) score, and approval status**, please log in below:`,
       html: cardAppStatus(p, liveStatus)
     };
   }
 
-  // 3. ALLOCATION & DISBURSEMENTS
+  // 15. ALLOCATION & DISBURSEMENTS
   if (/disburse|disbursement|schedule|upkeep|paid out|when will i receive|where is my upkeep|stipend|tranche/i.test(t)) {
     const tc = renderToolCard("get_disbursement_schedule", { email: S.email || "consultation", nationalId: S.nationalId || "consultation", name: S.name || "Student" });
     tc.classList.add("tool-done");
@@ -2162,13 +2201,13 @@ async function processHelbMessage(text, g) {
     }
     return {
       text: S.auth
-        ? `Here are your verified disbursement records retrieved from **portal.hef.co.ke** for **${S.name || S.nationalId || S.email}**:`
-        : `To check your **live upkeep stipend release dates and semester disbursement batches**, please connect your official HEF portal account below:`,
+        ? `Here are your verified disbursement records retrieved directly from **portal.hef.co.ke** for **${S.name || S.nationalId || S.email}**${S.bankName ? ` (Disbursement Account: **${S.bankName}** - \`${S.accountNumber || 'account'}\`)` : ''}:`
+        : `To check your **live upkeep stipend release dates and semester disbursement batches without guessing**, please connect your official HEF portal account below:`,
       html: cardDisb(liveDisb ? liveDisb.disbursements : p.disbursements, liveDisb)
     };
   }
 
-  // 4. REPAYMENT & PAYBILL / LIVE STK PUSH
+  // 16. REPAYMENT & PAYBILL / LIVE STK PUSH
   if (/repay|repayment|paybill|how to pay|mpesa|200800|pay back|settle loan|stk push/i.test(t)) {
     const tc = renderToolCard("get_repayment_details", { email: S.email || "consultation", nationalId: S.nationalId || "consultation", name: S.name || "Student" });
     tc.classList.add("tool-done");
@@ -2202,12 +2241,12 @@ async function processHelbMessage(text, g) {
     }
 
     return {
-      text: `You can repay your HELB loan directly via M-Pesa Paybill **200800** or trigger a live STK push:`,
+      text: `You can repay your HELB loan directly via M-Pesa Paybill **200800** (Account Number: **${S.nationalId || 'Your National ID'}**) or trigger a live STK push:`,
       html: cardRepaymentGuide(p)
     };
   }
 
-  // 5. STATEMENTS & RECEIPTS
+  // 17. STATEMENTS & RECEIPTS
   if (/statement|ledger|pdf|download statement|statement of account|receipt/i.test(t)) {
     const tc = renderToolCard("generate_loan_statement", { email: S.email || "consultation", nationalId: S.nationalId || "consultation", name: S.name || "Student" });
     tc.classList.add("tool-done");
@@ -2230,7 +2269,7 @@ async function processHelbMessage(text, g) {
     };
   }
 
-  // 6. EMPLOYER REMITTANCES
+  // 18. EMPLOYER REMITTANCES
   if (/employer|remittance|bulk checkoff|deduction schedule|remit/i.test(t)) {
     const tc = renderToolCard("employer_remittances", { portal: "portal.hef.co.ke/employer" });
     tc.classList.add("tool-done");
@@ -2240,31 +2279,34 @@ async function processHelbMessage(text, g) {
     };
   }
 
-  // Band Breakdown & Scholarship
+  // 19. Band Breakdown & Scholarship inquiry
   if (/band|scholarship|means test|mti|funding model|how much scholarship|percentage|allocation/i.test(t)) {
     const tc = renderToolCard("get_hef_band_breakdown", { email: S.email || "consultation", nationalId: S.nationalId || "consultation", name: S.name || "Student", band: S.band });
     tc.classList.add("tool-done");
     return {
       text: S.auth
-        ? `Here is your official Kenya Higher Education Financing (HEF) funding structure retrieved from **portal.hef.co.ke** for **${S.name || S.nationalId || S.email}**:`
-        : `To check your **exact assigned HEF band and scholarship percentage**, connect your official portal account below. Here is the official Kenyan Student-Centered Funding Model (Bands 1 to 5) reference matrix:`,
+        ? `According to **portal.hef.co.ke**, your assigned funding classification is **${S.band ? `Band ${S.band} (${p.band?.category || ''})` : (S.bandName || 'Pending portal assessment')}** for **${S.name || S.nationalId || S.email}**${S.programme ? ` studying ${S.programme}` : ''}:`
+        : `To check your **exact assigned HEF band and scholarship percentage from the portal**, connect your official account below. Here is the official Kenyan Student-Centered Funding Model (Bands 1 to 5) reference matrix:`,
       html: cardBandBreakdown(p)
     };
   }
 
-  // Balance & Dues
+  // 20. Balance & Dues inquiry
   if (/balance|outstanding|how much do i owe|dues|interest rate|debt/i.test(t)) {
     const tc = renderToolCard("get_loan_balance", { email: S.email || "consultation", nationalId: S.nationalId || "consultation", name: S.name || "Student" });
     tc.classList.add("tool-done");
+    const balDisplay = typeof p.outstandingBalance === "number" ? `KES ${p.outstandingBalance.toLocaleString()}` : (p.outstandingBalance || "Not recorded on portal");
+    const awardedDisplay = typeof p.cumulativeAwardedPrincipal === "number" ? `KES ${p.cumulativeAwardedPrincipal.toLocaleString()}` : (p.cumulativeAwardedPrincipal || "Not recorded on portal");
+    const disbursedDisplay = typeof p.cumulativeDisbursedLoan === "number" ? `KES ${p.cumulativeDisbursedLoan.toLocaleString()}` : (p.cumulativeDisbursedLoan || "Not recorded on portal");
     return {
       text: S.auth
-        ? `Here is your current HELB loan overview and outstanding balance retrieved from **portal.hef.co.ke** for **${S.name || S.nationalId || S.email}**:`
+        ? `Based on your authentic records on **portal.hef.co.ke** for **${S.name || S.nationalId || S.email}**:\n\n• **Current Outstanding Due:** **${balDisplay}**\n• **Total Awarded Principal:** **${awardedDisplay}**\n• **Total Disbursed Loan:** **${disbursedDisplay}**\n• **Total Repaid:** **KES ${(S.repaid || 0).toLocaleString()}**\n• **Interest Rate:** 4% p.a. simple interest on undergraduate degree loans`
         : `To view your **actual HELB loan balance and accrued interest without guessing**, please connect your official **portal.hef.co.ke** account:`,
       html: cardBalance(p)
     };
   }
 
-  // Appeal & Re-categorization
+  // 21. Appeal & Re-categorization
   if (/appeal|re-categoriz|wrong band|change band|financial problem|deceased|reclassify/i.test(t)) {
     const tc = renderToolCard("get_appeal_guidance", { email: S.email || "consultation", nationalId: S.nationalId || "consultation", currentBand: S.band });
     tc.classList.add("tool-done");
@@ -2274,7 +2316,7 @@ async function processHelbMessage(text, g) {
     };
   }
 
-  // Clearance & Compliance Certificate
+  // 22. Clearance & Compliance Certificate
   if (/clearance|compliance|certificate|clean record/i.test(t)) {
     const tc = renderToolCard("check_clearance_status", { email: S.email || "consultation", nationalId: S.nationalId || "consultation", balance: p.outstandingBalance });
     tc.classList.add("tool-done");
@@ -2286,17 +2328,7 @@ async function processHelbMessage(text, g) {
     };
   }
 
-  // Profile / Details query
-  if (/profile|who am i|my details|my name|my institution|my university|my id|my kcse|dashboard|portal details|show details/i.test(t)) {
-    return {
-      text: S.auth
-        ? `Here are your official HEF portal records retrieved from **portal.hef.co.ke** for **${S.name || S.nationalId || S.email}**:`
-        : `To view your **verified student profile details from the HELB portal**, please sign in below. Huduma Smart connects directly to **portal.hef.co.ke** and strictly avoids guessing student details:`,
-      html: cardHefPortalDashboard(p)
-    };
-  }
-
-  // Support & Contacts
+  // 23. Support & Contacts
   if (/support|contact|helpdesk|phone|email|huduma|anniversary|call|reach/i.test(t)) {
     return {
       text: `You can reach the official HELB & HEF Customer Service team via:\n\n• 📞 **Phone Support:** +254 711 052 000 / +254 20 2278 000\n• 📧 **Email:** \`contactcentre@helb.co.ke\` / \`info@hef.co.ke\`\n• 🏢 **Huduma Centres:** HELB service desks are active in all 47 county Huduma Centres countrywide\n• 🏢 **Head Office:** Anniversary Towers, 18th & 19th Floors, University Way, Nairobi\n• 🌐 **Official Portals:** [hef.co.ke](https://www.hef.co.ke) | [portal.hef.co.ke](https://portal.hef.co.ke)`,
@@ -2307,7 +2339,7 @@ async function processHelbMessage(text, g) {
   // Context-aware dynamic fallback acknowledging student and inquiry
   return {
     text: S.auth
-      ? `I am here to assist with your active HEF account, **${S.name || S.nationalId || S.email}**.\n\nYou can ask me specific questions such as:\n• *"What is my loan balance and interest?"*\n• *"How much is my upkeep stipend per semester?"*\n• *"Show my disbursement dates"*\n• *"How do I appeal for Band 1 or Band 2?"*\n• *"Download my loan statement"*\n• *"Repay loan via M-Pesa STK Push"*`
+      ? `I am here to assist with your verified HEF Portal account for **${S.name || S.nationalId || S.email}**.\n\nYou can ask me specific questions such as:\n• *"What is my loan balance?"*\n• *"What is my assigned band?"*\n• *"Show my disbursement dates"*\n• *"What is my registered bank account?"*\n• *"Download my loan statement"*\n• *"Repay loan via M-Pesa STK Push"*`
       : `I am here to assist with all HELB & HEF student financing queries directly from the official portal.\n\nYou can ask me:\n• *"Explain Band 1 to Band 5 percentages"*\n• *"What is my loan balance and interest?"*\n• *"When is upkeep disbursed?"*\n• *"How to repay loan via M-Pesa Paybill 200800"*\n• *"How do I appeal my band allocation?"*\n• *"Log in to HEF portal"*`,
     html: cardHefPortalDashboard(p)
   };
